@@ -157,21 +157,37 @@ export default function WestminsterMap() {
         }
       ];
 
+      // create the map
       const map = new google.maps.Map(
         document.getElementById("map") as HTMLElement,
         {
           center: { lat: 51.4995, lng: -0.1245 },
           zoom: 16,
-          minZoom: 12,
-          maxZoom: 19,
+          minZoom: 15,
+          maxZoom: 17,
           heading: 0,
           tilt: 0,
           styles: customStyle,
+          mapTypeId: "roadmap",
           disableDefaultUI: true
         }
       );
 
-      console.log("✅ Google Maps with custom JSON style ready", map);
+      // listen for the FAB menu's event
+      window.addEventListener("toggle-satellite", () => {
+        const currentType = map.getMapTypeId();
+        if (currentType === "satellite") {
+          map.setMapTypeId("roadmap");
+          map.setOptions({ styles: customStyle });
+          console.log("✅ switched to roadmap with style");
+        } else {
+          map.setMapTypeId("satellite");
+          map.setOptions({ styles: null });
+          console.log("✅ switched to satellite");
+        }
+      });
+
+      console.log("✅ Google Maps with FAB event listener ready", map);
     }
   }, []);
 
