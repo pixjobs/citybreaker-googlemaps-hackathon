@@ -6,8 +6,10 @@ import gsap from "gsap";
 interface City {
   name: string;
   timezone: string;
-  lat: number;
-  lng: number;
+  time?: string;
+  flight?: string;
+  gate?: string;
+  remark?: string;
 }
 
 export default function SplitFlapBoard({
@@ -50,11 +52,11 @@ export default function SplitFlapBoard({
         {
           rotateX: 0,
           opacity: 1,
-          duration: 0.6,
-          ease: "back.out(2)",
+          duration: 0.5,
+          ease: "back.out(1.7)",
           stagger: {
-            amount: 1,
-            each: 0.05,
+            amount: 0.5,
+            each: 0.02,
           },
         }
       );
@@ -64,27 +66,41 @@ export default function SplitFlapBoard({
   return (
     <div
       ref={boardRef}
-      className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-black/90 border border-yellow-400 p-4 rounded text-yellow-300 font-mono uppercase text-sm sm:text-base"
+      className="w-full bg-black border-2 border-yellow-500 rounded-md font-mono text-sm text-white overflow-auto"
     >
+      <div className="grid grid-cols-5 text-yellow-400 px-4 py-2 border-b border-yellow-500 uppercase font-bold tracking-wide text-xs sm:text-sm">
+        <div>Time</div>
+        <div>Destination</div>
+        <div>Flight</div>
+        <div>Gate</div>
+        <div>Remark</div>
+      </div>
+
       {cities.map((city, idx) => (
         <div
           key={`city-${idx}`}
-          className="flex flex-col cursor-pointer hover:bg-yellow-600/20 transition px-2 py-3 rounded"
+          className="grid grid-cols-5 px-4 py-2 hover:bg-yellow-500/10 cursor-pointer text-white border-b border-yellow-700 transition-all"
           onClick={() => onSelectCity(city)}
         >
-          <div className="flex gap-1 flex-wrap mb-1">
-            {city.name.split("").map((c, i) => (
-              <span
-                key={i}
-                className="letter inline-block px-1 py-0.5 rounded shadow border border-yellow-500"
-              >
-                {c}
-              </span>
-            ))}
-          </div>
-          <span className="text-xs sm:text-sm text-yellow-200">
+          <div className="letter text-yellow-200">
             {cityTimes[city.name] ?? "--:--"}
-          </span>
+          </div>
+          <div className="letter text-yellow-300 font-bold tracking-widest">
+            {city.name.toUpperCase()}
+          </div>
+          <div className="letter">{city.flight || "—"}</div>
+          <div className="letter">{city.gate || "—"}</div>
+          <div
+            className={`letter ${
+              city.remark === "DELAYED"
+                ? "text-red-400"
+                : city.remark === "BOARDING"
+                ? "text-green-400"
+                : "text-white"
+            }`}
+          >
+            {city.remark || "ON TIME"}
+          </div>
         </div>
       ))}
     </div>

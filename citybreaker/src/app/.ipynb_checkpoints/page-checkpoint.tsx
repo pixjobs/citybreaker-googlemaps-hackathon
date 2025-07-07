@@ -115,7 +115,7 @@ export default function HomePage() {
           >
             <div className="flex items-center gap-2">
               <SplitFlap text={currentCityName} />
-              <span className="text-xl">✈️ 🌍 🗺️</span>
+              <span className="text-xl"></span>
             </div>
             <span className="text-xs mt-1 text-white">
               {getCityTime(currentCityName)}

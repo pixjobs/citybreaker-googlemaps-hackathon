@@ -5,12 +5,11 @@ import gsap from "gsap";
 
 export default function SplitFlap({ text }: { text?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const safeText = typeof text === "string" ? text : "";
+
+  // Initial entrance animation
   useEffect(() => {
-    audioRef.current = new Audio("/sounds/flip.wav");
-    audioRef.current.volume = 0.2;
-
     if (containerRef.current) {
       const letters = containerRef.current.querySelectorAll(".letter");
 
@@ -23,18 +22,45 @@ export default function SplitFlap({ text }: { text?: string }) {
           duration: 0.6,
           ease: "back.out(2)",
           stagger: {
-            amount: 0.6,
             each: 0.05,
-            onStart: () => {
-              audioRef.current?.play().catch(() => {});
-            },
           },
         }
       );
     }
-  }, [text]);
+  }, [safeText]);
 
-  const safeText = typeof text === "string" ? text : String(text ?? "");
+  // Simulate chatter flips every 12s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (containerRef.current) {
+        const letters = containerRef.current.querySelectorAll(".letter");
+
+        // Simulate flipping away and back in
+        gsap.to(letters, {
+          rotateX: 90,
+          opacity: 0.5,
+          duration: 0.3,
+          ease: "power2.in",
+          stagger: {
+            each: 0.02,
+          },
+          onComplete: () => {
+            gsap.to(letters, {
+              rotateX: 0,
+              opacity: 1,
+              duration: 0.3,
+              ease: "back.out(2)",
+              stagger: {
+                each: 0.02,
+              },
+            });
+          },
+        });
+      }
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div
