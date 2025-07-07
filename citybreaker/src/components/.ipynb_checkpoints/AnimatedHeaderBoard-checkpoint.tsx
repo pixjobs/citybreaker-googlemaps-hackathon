@@ -4,6 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import SplitFlapBoard from "@/components/SplitFlapBoard";
 import CityBreakerLogo from "@/components/CityBreakerLogo";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Globe,
+  Compass,
+  Landmark,
+  Utensils,
+  MapPinned,
+  Menu,
+  X,
+} from "lucide-react";
 
 interface City {
   name: string;
@@ -11,6 +21,14 @@ interface City {
   lat: number;
   lng: number;
 }
+
+const menuItems = [
+  { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me" },
+  { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary" },
+  { label: "Satellite", icon: <Globe size={18} />, action: "toggle-satellite" },
+  { label: "Landmarks", icon: <Landmark size={18} />, action: "toggle-landmarks" },
+  { label: "Restaurants", icon: <Utensils size={18} />, action: "toggle-restaurants" },
+];
 
 export default function AnimatedHeaderBoard({
   cities,
@@ -21,109 +39,121 @@ export default function AnimatedHeaderBoard({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  const buttonTextRef = useRef<HTMLSpanElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  // Animate header entrance
   useEffect(() => {
     if (containerRef.current) {
       gsap.fromTo(
         containerRef.current,
-        { y: -80, opacity: 0 },
+        { y: -100, opacity: 0 },
         {
           y: 0,
           opacity: 1,
-          duration: 0.6,
-          ease: "power3.out",
+          duration: 1,
+          ease: "power4.out",
         }
       );
     }
   }, []);
 
-  // Expand/collapse SplitFlapBoard
-  useEffect(() => {
-    const el = boardRef.current;
-    if (!el) return;
-
-    if (expanded) {
-      el.style.display = "block";
-      gsap.fromTo(
-        el,
-        { height: 0, opacity: 0 },
-        {
-          height: "auto",
-          opacity: 1,
-          duration: 0.35,
-          ease: "power2.out",
-          clearProps: "height",
-        }
-      );
-    } else {
-      gsap.to(el, {
-        height: 0,
-        opacity: 0,
-        duration: 0.3,
-        ease: "power2.in",
+  const toggleBoard = () => {
+    setExpanded((prev) => !prev);
+    if (boardRef.current) {
+      gsap.to(boardRef.current, {
+        height: expanded ? 0 : "auto",
+        opacity: expanded ? 0 : 1,
+        duration: 0.5,
+        ease: "power2.out",
+        onStart: () => {
+          if (!expanded) boardRef.current!.style.display = "block";
+        },
         onComplete: () => {
-          el.style.display = "none";
+          if (expanded) boardRef.current!.style.display = "none";
         },
       });
     }
+  };
 
-    // Animate the button label
-    if (buttonTextRef.current) {
-      gsap.fromTo(
-        buttonTextRef.current,
-        { y: -10, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: 0.3,
-          ease: "back.out(1.7)",
-        }
-      );
+  const handleItemClick = (action: string) => {
+    switch (action) {
+      case "toggle-satellite":
+        window.dispatchEvent(new Event("toggle-satellite"));
+        break;
+      case "toggle-landmarks":
+        window.dispatchEvent(new Event("show-landmarks-menu"));
+        break;
+      case "toggle-restaurants":
+        window.dispatchEvent(new Event("show-restaurants-menu"));
+        break;
+      case "surprise-me":
+        console.log("🎯 surprise-me triggered (Gemini to hook here)");
+        break;
+      case "itinerary":
+        console.log("📍 itinerary triggered (hook up later)");
+        break;
     }
-  }, [expanded]);
-
-  // Handler for when a city is selected
-  const handleCitySelect = (city: City) => {
-    // Collapse the board
-    setExpanded(false);
-    // Notify parent
-    onSelectCity(city);
+    setMenuOpen(false);
   };
 
   return (
     <header
       ref={containerRef}
-      className="fixed top-0 left-0 w-full z-40 bg-black/70 backdrop-blur-md border-b border-yellow-500 shadow-md"
+      className="fixed top-0 left-0 w-full z-50 bg-black/80 backdrop-blur border-b border-yellow-500 text-yellow-300"
     >
       <div className="flex items-center justify-between px-4 py-2">
-        {/* Logo */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <CityBreakerLogo />
-          <span className="text-yellow-400 font-bold tracking-wider text-lg hidden sm:inline">
-          </span>
+          <span className="font-bold text-lg hidden sm:inline"></span>
         </div>
 
-        {/* Toggle Button */}
-        <button
-          onClick={() => setExpanded((prev) => !prev)}
-          className="text-yellow-300 hover:text-yellow-100 text-sm border border-yellow-400 px-3 py-1 rounded transition"
-        >
-          <span ref={buttonTextRef}>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={toggleBoard}
+            className="text-xs sm:text-sm border border-yellow-400 px-3 py-1 rounded hover:bg-yellow-600/20"
+          >
             {expanded ? "Hide Cities ▲" : "Show Cities ▼"}
-          </span>
-        </button>
+          </button>
+
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="border border-yellow-400 px-3 py-1 rounded hover:bg-yellow-600/20"
+            >
+              {menuOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+
+            <AnimatePresence>
+              {menuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-0 mt-2 bg-black border border-yellow-400 text-yellow-200 rounded shadow-lg z-50 min-w-[180px]"
+                >
+                  {menuItems.map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => handleItemClick(item.action)}
+                      className="w-full flex items-center gap-2 px-4 py-2 hover:bg-yellow-600/20 text-left"
+                    >
+                      {item.icon}
+                      <span className="text-sm">{item.label}</span>
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
 
-      {/* City Board (with auto-collapse animation) */}
       <div
         ref={boardRef}
-        style={{ height: 0, display: "none", opacity: 0, overflow: "hidden" }}
-        className="px-4 pb-2 will-change-[height,opacity]"
+        style={{ height: 0, overflow: "hidden", display: "none", opacity: 0 }}
+        className="px-4 pb-3"
       >
-        <SplitFlapBoard cities={cities} onSelectCity={handleCitySelect} />
+        <SplitFlapBoard cities={cities} onSelectCity={onSelectCity} />
       </div>
     </header>
   );

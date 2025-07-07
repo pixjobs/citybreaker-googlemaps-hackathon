@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import gsap from "gsap";
 import CityMap from "@/components/CityMap";
 import TravelText from "@/components/TravelText";
 import FABMenu from "@/components/FABMenu";
 import ProgressBar from "@/components/ProgressBar";
 import SplitFlap from "@/components/SplitFlap";
-import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard"; // new header component
+import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard";
 
 export default function HomePage() {
   const [started, setStarted] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
   const [currentCityName, setCurrentCityName] = useState<string>("London");
   const [showTravelText, setShowTravelText] = useState(false);
+  const introRef = useRef<HTMLDivElement>(null);
 
   const countryColors: Record<string, string> = {
     London: "#ff0000",
@@ -65,16 +68,49 @@ export default function HomePage() {
     return () => window.removeEventListener("citySelect", handleCitySelect);
   }, []);
 
+  useEffect(() => {
+    if (showIntro && introRef.current) {
+      gsap.fromTo(
+        introRef.current,
+        { opacity: 0, y: 50 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 1.2,
+          ease: "power4.out",
+          onComplete: () => {
+            setTimeout(() => {
+              gsap.to(introRef.current, {
+                opacity: 0,
+                y: -50,
+                duration: 1,
+                ease: "power2.inOut",
+                onComplete: () => {
+                  setShowIntro(false);
+                  setStarted(true);
+                },
+              });
+            }, 4500);
+          },
+        }
+      );
+    }
+  }, [showIntro]);
+
   return (
     <div className="relative w-full h-screen overflow-hidden">
       <CityMap />
 
-      {!started && (
+      {showIntro && (
         <div
-          className="absolute inset-0 flex items-center justify-center bg-black/90 text-white z-50"
-          onClick={() => setStarted(true)}
+          ref={introRef}
+          className="absolute inset-0 flex items-center justify-center bg-black/95 text-white z-50 px-4"
         >
-          <h1 className="text-4xl font-bold">Click to Start</h1>
+          <TravelText
+            active={true}
+            destination="CityBreaker is your interactive travel dashboard. Explore cities, see local times, and dive into immersive flight-style transitions."
+            onComplete={() => {}}
+          />
         </div>
       )}
 
@@ -105,7 +141,6 @@ export default function HomePage() {
             onComplete={() => setShowTravelText(false)}
           />
 
-          {/* Current city display */}
           <div
             className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow"
             style={{
@@ -115,7 +150,6 @@ export default function HomePage() {
           >
             <div className="flex items-center gap-2">
               <SplitFlap text={currentCityName} />
-              <span className="text-xl"></span>
             </div>
             <span className="text-xs mt-1 text-white">
               {getCityTime(currentCityName)}
