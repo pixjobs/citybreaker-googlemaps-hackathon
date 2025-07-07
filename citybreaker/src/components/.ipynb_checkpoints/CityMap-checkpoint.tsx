@@ -18,16 +18,16 @@ export default function CityMap() {
   const flightPathRef = useRef<google.maps.Polyline | null>(null);
   const flightMarkerRef = useRef<google.maps.Marker | null>(null);
 
-  const airports: Record<string, google.maps.LatLngLiteral> = {
-    London: { lat: 51.4700, lng: -0.4543 },
-    Paris: { lat: 49.0097, lng: 2.5479 },
-    Berlin: { lat: 52.3667, lng: 13.5033 },
-    Prague: { lat: 50.1008, lng: 14.26 },
-    Beijing: { lat: 40.0801, lng: 116.5846 },
-    Seoul: { lat: 37.4602, lng: 126.4407 },
-    Tokyo: { lat: 35.5494, lng: 139.7798 },
-    "San Francisco": { lat: 37.6213, lng: -122.3790 },
-    "New York": { lat: 40.6413, lng: -73.7781 },
+  const landmarks: Record<string, google.maps.LatLngLiteral> = {
+    London: { lat: 51.4995, lng: -0.1245 }, // Westminster
+    Paris: { lat: 48.8584, lng: 2.2945 },   // Eiffel Tower
+    Berlin: { lat: 52.5163, lng: 13.3777 }, // Brandenburg Gate
+    Prague: { lat: 50.0870, lng: 14.4208 }, // Old Town Square
+    Beijing: { lat: 39.9163, lng: 116.3972 }, // Forbidden City
+    Seoul: { lat: 37.5796, lng: 126.9770 },   // Gyeongbokgung Palace
+    Tokyo: { lat: 35.7100, lng: 139.8107 },   // Tokyo Skytree
+    "San Francisco": { lat: 37.7749, lng: -122.4194 }, // Golden Gate area
+    "New York": { lat: 40.7829, lng: -73.9654 },       // Central Park
   };
 
   useEffect(() => {
@@ -52,7 +52,7 @@ export default function CityMap() {
       ];
 
       mapInstance = new google.maps.Map(document.getElementById("map") as HTMLElement, {
-        center: airports.London,
+        center: landmarks.London,
         zoom: 12,
         styles: customStyle,
         disableDefaultUI: true,
@@ -63,10 +63,10 @@ export default function CityMap() {
 
       window.addEventListener("citySelect", (e) => {
         const detail = (e as CustomEvent).detail;
-        if (detail && detail.name && airports[detail.name]) {
-          const nextAirport = new google.maps.LatLng(
-            airports[detail.name].lat,
-            airports[detail.name].lng
+        if (detail && detail.name && landmarks[detail.name]) {
+          const nextLandmark = new google.maps.LatLng(
+            landmarks[detail.name].lat,
+            landmarks[detail.name].lng
           );
 
           const currentPos = mapInstance.getCenter()!;
@@ -77,7 +77,7 @@ export default function CityMap() {
           }
 
           flightPathRef.current = new google.maps.Polyline({
-            path: [currentPos, nextAirport],
+            path: [currentPos, nextLandmark],
             geodesic: true,
             strokeColor: "#ffcc00",
             strokeOpacity: 1.0,
@@ -105,7 +105,7 @@ export default function CityMap() {
           );
 
           // pan
-          mapInstance.panTo(nextAirport);
+          mapInstance.panTo(nextLandmark);
           mapInstance.setZoom(detail.zoom || 12);
         }
       });
