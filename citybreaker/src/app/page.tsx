@@ -6,7 +6,7 @@ import TravelText from "@/components/TravelText";
 import FABMenu from "@/components/FABMenu";
 import ProgressBar from "@/components/ProgressBar";
 import SplitFlap from "@/components/SplitFlap";
-import SplitFlapBoard from "@/components/SplitFlapBoard";
+import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard"; // new header component
 
 export default function HomePage() {
   const [started, setStarted] = useState(false);
@@ -26,15 +26,15 @@ export default function HomePage() {
   };
 
   const cities = [
-    { name: "London", timezone: "Europe/London" },
-    { name: "Paris", timezone: "Europe/Paris" },
-    { name: "Berlin", timezone: "Europe/Berlin" },
-    { name: "Prague", timezone: "Europe/Prague" },
-    { name: "Beijing", timezone: "Asia/Shanghai" },
-    { name: "Seoul", timezone: "Asia/Seoul" },
-    { name: "Tokyo", timezone: "Asia/Tokyo" },
-    { name: "San Francisco", timezone: "America/Los_Angeles" },
-    { name: "New York", timezone: "America/New_York" },
+    { name: "London", timezone: "Europe/London", lat: 51.5, lng: -0.12 },
+    { name: "Paris", timezone: "Europe/Paris", lat: 48.8566, lng: 2.3522 },
+    { name: "Berlin", timezone: "Europe/Berlin", lat: 52.52, lng: 13.405 },
+    { name: "Prague", timezone: "Europe/Prague", lat: 50.0755, lng: 14.4378 },
+    { name: "Beijing", timezone: "Asia/Shanghai", lat: 39.9042, lng: 116.4074 },
+    { name: "Tokyo", timezone: "Asia/Tokyo", lat: 35.6895, lng: 139.6917 },
+    { name: "Seoul", timezone: "Asia/Seoul", lat: 37.5665, lng: 126.978 },
+    { name: "New York", timezone: "America/New_York", lat: 40.7128, lng: -74.006 },
+    { name: "San Francisco", timezone: "America/Los_Angeles", lat: 37.7749, lng: -122.4194 },
   ];
 
   const cityTimezones: Record<string, string> = Object.fromEntries(
@@ -80,6 +80,22 @@ export default function HomePage() {
 
       {started && (
         <>
+          <AnimatedHeaderBoard
+            cities={cities}
+            onSelectCity={(city) => {
+              window.dispatchEvent(
+                new CustomEvent("citySelect", {
+                  detail: {
+                    name: city.name,
+                    lat: city.lat,
+                    lng: city.lng,
+                    zoom: 14,
+                  },
+                })
+              );
+            }}
+          />
+
           <FABMenu />
           <ProgressBar />
 
@@ -89,7 +105,7 @@ export default function HomePage() {
             onComplete={() => setShowTravelText(false)}
           />
 
-          {/* current city splitflap on bottom left */}
+          {/* Current city display */}
           <div
             className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow"
             style={{
@@ -99,31 +115,12 @@ export default function HomePage() {
           >
             <div className="flex items-center gap-2">
               <SplitFlap text={currentCityName} />
-
+              <span className="text-xl">✈️ 🌍 🗺️</span>
             </div>
             <span className="text-xs mt-1 text-white">
               {getCityTime(currentCityName)}
             </span>
           </div>
-
-          {/* interactive airport board */}
-          <section className="absolute top-6 right-6 z-30 max-w-lg hidden md:block">
-            <SplitFlapBoard
-              cities={cities}
-              onSelectCity={(city) => {
-                window.dispatchEvent(
-                  new CustomEvent("citySelect", {
-                    detail: {
-                      name: city.name,  // fixed here
-                      lat: 0,           // coordinate details can be filled later
-                      lng: 0,
-                      zoom: 12,
-                    },
-                  })
-                );
-              }}
-            />
-          </section>
         </>
       )}
     </div>

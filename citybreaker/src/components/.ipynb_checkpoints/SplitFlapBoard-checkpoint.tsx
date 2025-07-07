@@ -21,7 +21,6 @@ export default function SplitFlapBoard({
   const [cityTimes, setCityTimes] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    // update time every minute
     const updateTimes = () => {
       const updated: Record<string, string> = {};
       cities.forEach((c) => {
@@ -65,12 +64,12 @@ export default function SplitFlapBoard({
   return (
     <div
       ref={boardRef}
-      className="grid grid-cols-2 gap-4 bg-black/90 border border-yellow-400 p-4 rounded text-yellow-300 font-mono uppercase text-sm"
+      className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-black/90 border border-yellow-400 p-4 rounded text-yellow-300 font-mono uppercase text-sm sm:text-base"
     >
       {cities.map((city, idx) => (
         <div
           key={`city-${idx}`}
-          className="flex flex-col cursor-pointer hover:bg-yellow-600/20 transition px-2 py-1 rounded"
+          className="flex flex-col cursor-pointer hover:bg-yellow-600/20 transition px-2 py-3 rounded"
           onClick={() => onSelectCity(city)}
         >
           <div className="flex gap-1 flex-wrap mb-1">
@@ -83,7 +82,7 @@ export default function SplitFlapBoard({
               </span>
             ))}
           </div>
-          <span className="text-xs text-yellow-200">
+          <span className="text-xs sm:text-sm text-yellow-200">
             {cityTimes[city.name] ?? "--:--"}
           </span>
         </div>
