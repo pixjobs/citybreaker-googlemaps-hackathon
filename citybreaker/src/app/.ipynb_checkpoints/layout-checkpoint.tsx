@@ -13,15 +13,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CityBreaker – London",
-  description: "Plan your London city break with AI",
+  title: "CityBreaker – Ultimate City Break Planner",
+  description: "Plan your perfect city break with CityBreaker. Discover and explore your favourite cities worldwide.",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en">
       <body
