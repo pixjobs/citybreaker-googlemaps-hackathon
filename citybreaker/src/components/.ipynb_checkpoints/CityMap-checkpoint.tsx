@@ -43,6 +43,7 @@ function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement>, isOpen: boo
 export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const panelContainerRef = useRef<HTMLDivElement>(null);
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
 
   const [itinerary, setItinerary] = useState<string | null>(null);
   const [placePhotos, setPlacePhotos] = useState<PlacePhotoInfo[]>([]);
@@ -78,43 +79,19 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
 
       if (!mapRef.current && document.getElementById("map")) {
         mapRef.current = new Map(document.getElementById("map") as HTMLElement, {
-          center: center,
+          center,
           zoom: center.zoom,
           disableDefaultUI: true,
           styles: [
             { elementType: "geometry", stylers: [{ color: "#1d2c4d" }] },
             { elementType: "labels.text.fill", stylers: [{ color: "#8ec3b9" }] },
             { elementType: "labels.text.stroke", stylers: [{ color: "#1a3646" }] },
-            {
-              featureType: "administrative",
-              elementType: "geometry.stroke",
-              stylers: [{ color: "#14546a" }],
-            },
-            {
-              featureType: "landscape.natural",
-              elementType: "geometry",
-              stylers: [{ color: "#023e58" }],
-            },
-            {
-              featureType: "poi",
-              elementType: "geometry",
-              stylers: [{ color: "#0c4152" }],
-            },
-            {
-              featureType: "road",
-              elementType: "geometry",
-              stylers: [{ color: "#00ff90" }],
-            },
-            {
-              featureType: "road",
-              elementType: "labels.text.fill",
-              stylers: [{ color: "#ffffff" }],
-            },
-            {
-              featureType: "water",
-              elementType: "geometry",
-              stylers: [{ color: "#0e1626" }],
-            },
+            { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#14546a" }] },
+            { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#023e58" }] },
+            { featureType: "poi", elementType: "geometry", stylers: [{ color: "#0c4152" }] },
+            { featureType: "road", elementType: "geometry", stylers: [{ color: "#00ff90" }] },
+            { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#ffffff" }] },
+            { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e1626" }] },
           ],
         });
       }
@@ -136,18 +113,60 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
             return;
           }
 
-          const placesData = results.map((p) => ({
-            name: p.name,
-            photoUrl: p.photos?.[0]?.getUrl(),
-          }));
+          // Remove old markers & polyline
+          if (mapRef.current) {
+            mapRef.current.getMarkers?.()?.forEach(m => m.setMap(null));
+            polylineRef.current?.setMap(null);
+          }
 
-          setPlacePhotos(placesData);
+          const photoInfo: PlacePhotoInfo[] = [];
+          const pathCoords: google.maps.LatLngLiteral[] = [];
+
+          results.forEach(p => {
+            if (!p.geometry?.location) return;
+            const loc = p.geometry.location;
+            // Collect path coords in sequence
+            pathCoords.push({ lat: loc.lat(), lng: loc.lng() });
+
+            const marker = new google.maps.Marker({
+              position: loc,
+              map: mapRef.current!,
+              title: p.name,
+            });
+
+            const photoUrl = p.photos?.[0]?.getUrl();
+            photoInfo.push({ name: p.name, photoUrl });
+
+            const content = `
+  <div style="background: rgba(0,0,0,0.9); color: #F1C40F; padding: 12px; border-radius: 8px; max-width: 220px; font-family: sans-serif; line-height: 1.4;">
+    ${photoUrl ? `<img src=\"${photoUrl}\" style=\"width:100%; height:auto; border-radius:4px; margin-bottom:8px;\" />` : ''}
+    <h3 style="margin:0 0 4px; font-size:1.1rem; color:#ffffff;">${p.name}</h3>
+    <p style="margin:0 0 6px; font-size:0.9rem; color:#BDC3C7;">${p.vicinity || ''}</p>
+    <p style="margin:0 0 8px; font-size:0.85rem; color:#ECECEC;">${p.types?.join(', ') || 'Attraction'}</p>
+    <a href=\"https://www.google.com/maps/place/?q=place_id:${p.place_id}\" target=\"_blank\" style=\"display:inline-block; color:#7DF9FF; font-size:0.9rem; text-decoration:underline; margin-top:4px;\">View on Google Maps</a>
+  </div>`;
+
+            const infoWindow = new google.maps.InfoWindow({ content });
+            marker.addListener('click', () => infoWindow.open({ map: mapRef.current, anchor: marker }));
+          });
+
+          setPlacePhotos(photoInfo);
+
+          // Draw itinerary path
+          polylineRef.current = new google.maps.Polyline({
+            path: pathCoords,
+            geodesic: true,
+            strokeColor: '#00ff90',
+            strokeOpacity: 0.8,
+            strokeWeight: 4,
+            map: mapRef.current!,
+          });
 
           try {
             const res = await fetch("/api/gemini-recommendations", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ places: placesData, tripLength }),
+              body: JSON.stringify({ places: photoInfo, tripLength }),
             });
 
             if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
@@ -170,10 +189,7 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
 
   return (
     <>
-      <div
-        id="map"
-        className="absolute inset-0 z-0"
-      />
+      <div id="map" className="absolute inset-0 z-0" />
 
       <button
         onClick={() => setIsPanelOpen(!isPanelOpen)}
