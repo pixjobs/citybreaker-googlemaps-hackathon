@@ -8,7 +8,6 @@ import ProgressBar from "@/components/ProgressBar";
 import SplitFlap from "@/components/SplitFlap";
 import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard";
 
-// It's good practice to define types outside the component
 interface City {
   name: string;
   timezone: string;
@@ -17,13 +16,12 @@ interface City {
 }
 
 export default function HomePage() {
-  // --- Data Configuration ---
   const cities: City[] = [
     { name: "London", timezone: "Europe/London", lat: 51.5074, lng: -0.1278 },
     { name: "Paris", timezone: "Europe/Paris", lat: 48.8566, lng: 2.3522 },
     { name: "Berlin", timezone: "Europe/Berlin", lat: 52.52, lng: 13.405 },
     { name: "Prague", timezone: "Europe/Prague", lat: 50.0755, lng: 14.4378 },
-    { name: "Dubai", timezone: "Asia/Dubai", lat: 25.2048, lng: 55.2708 }, // Dubai Added
+    { name: "Dubai", timezone: "Asia/Dubai", lat: 25.2048, lng: 55.2708 },
     { name: "Beijing", timezone: "Asia/Shanghai", lat: 39.9042, lng: 116.4074 },
     { name: "Tokyo", timezone: "Asia/Tokyo", lat: 35.6895, lng: 139.6917 },
     { name: "Seoul", timezone: "Asia/Seoul", lat: 37.5665, lng: 126.978 },
@@ -36,7 +34,7 @@ export default function HomePage() {
     Paris: "#0055A4",
     Berlin: "#000000",
     Prague: "#D7141A",
-    Dubai: "#FFC300", // Dubai Color Added
+    Dubai: "#FFC300",
     Beijing: "#ffde00",
     Seoul: "#003478",
     Tokyo: "#bc002d",
@@ -44,15 +42,12 @@ export default function HomePage() {
     "New York": "#3c3b6e",
   };
 
-  // --- State Management ---
   const [started, setStarted] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
   const [showTravelText, setShowTravelText] = useState(false);
-  // This is the single source of truth for the selected city
   const [selectedCity, setSelectedCity] = useState<City>(cities[0]);
   const introRef = useRef<HTMLDivElement>(null);
 
-  // --- Helper Functions ---
   const getCityTime = (timezone: string) => {
     try {
       return new Intl.DateTimeFormat("en-GB", {
@@ -65,8 +60,6 @@ export default function HomePage() {
     }
   };
 
-  // --- Effects ---
-  // Effect to handle the intro animation
   useEffect(() => {
     if (showIntro && introRef.current) {
       gsap.fromTo(
@@ -96,23 +89,23 @@ export default function HomePage() {
     }
   }, [showIntro]);
 
-  // Effect to trigger the travel text animation when the city changes
   useEffect(() => {
-    // We only want to trigger this after the intro is done
     if (started) {
-      setShowTravelText(true);
+      setShowTravelText(false);
+      const timer = setTimeout(() => {
+        setShowTravelText(true);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [selectedCity, started]);
 
   return (
     <div className="relative w-full h-screen overflow-hidden">
-      {/* The map now receives the selected city's data directly as props.
-          The zoom level is hardcoded to 14 for a good city-level view. */}
       <CityMap
         center={{
           lat: selectedCity.lat,
           lng: selectedCity.lng,
-          zoom: 14, // This ensures the map is zoomed in on the city
+          zoom: 14,
           name: selectedCity.name
         }}
       />
@@ -132,8 +125,6 @@ export default function HomePage() {
 
       {started && (
         <>
-          {/* onSelectCity now directly updates the state in this component.
-              This is the correct "React way" to handle child-to-parent communication. */}
           <AnimatedHeaderBoard
             cities={cities}
             onSelectCity={setSelectedCity}
@@ -141,14 +132,14 @@ export default function HomePage() {
 
           <ProgressBar />
 
-          {/* This component is now driven by the selectedCity state */}
+          {/* --- THIS IS THE CORRECTED BLOCK --- */}
           <TravelText
             active={showTravelText}
             destination={selectedCity.name}
             onComplete={() => setShowTravelText(false)}
           />
+          {/* The stray brace has been removed from the line above */}
 
-          {/* This component is now also driven by the selectedCity state */}
           <div
             className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow"
             style={{
