@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"; // 1. Import useMemo
 import gsap from "gsap";
 import CityMap from "@/components/CityMap";
 import TravelText from "@/components/TravelText";
@@ -29,57 +29,59 @@ export default function HomePage() {
     { name: "San Francisco", timezone: "America/Los_Angeles", lat: 37.7749, lng: -122.4194 },
   ];
 
-  const countryColors: Record<string, string> = {
-    London: "#ff0000",
-    Paris: "#0055A4",
-    Berlin: "#000000",
-    Prague: "#D7141A",
-    Dubai: "#FFC300",
-    Beijing: "#ffde00",
-    Seoul: "#003478",
-    Tokyo: "#bc002d",
-    "San Francisco": "#b22222",
-    "New York": "#3c3b6e",
-  };
+  const countryColors: Record<string, string> = { /* ... */ };
 
   const [started, setStarted] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
-  const [showTravelText, setShowTravelText] = useState(false);
   const [selectedCity, setSelectedCity] = useState<City>(cities[0]);
   const introRef = useRef<HTMLDivElement>(null);
 
-  const getCityTime = (timezone: string) => {
-    try {
-      return new Intl.DateTimeFormat("en-GB", {
-        timeZone: timezone,
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date());
-    } catch {
-      return "--:--";
-    }
-  };
+  const [isSequenceReady, setIsSequenceReady] = useState(false);
+  const [placePhotos, setPlacePhotos] = useState<string[]>([]);
 
+  const getCityTime = (timezone: string) => { /* ... */ };
+
+  // --- 2. STABILIZE the center object with useMemo ---
+  // This object will now only be recreated when `selectedCity` changes.
+  const center = useMemo(() => ({
+    lat: selectedCity.lat,
+    lng: selectedCity.lng,
+    zoom: 14,
+    name: selectedCity.name
+  }), [selectedCity]);
+
+  // --- STABLE HANDLER FUNCTIONS with useCallback ---
+  const handleSelectCity = useCallback((city: City) => {
+    setIsSequenceReady(false);
+    setSelectedCity(city);
+  }, []);
+
+  const handlePlacesLoaded = useCallback((photoUrls: string[]) => {
+    setPlacePhotos(photoUrls.slice(0, 5));
+    setIsSequenceReady(true);
+  }, []);
+
+  const handleTravelTextComplete = useCallback(() => {
+    setIsSequenceReady(false);
+  }, []);
+
+  // Effect for the initial app intro animation
   useEffect(() => {
     if (showIntro && introRef.current) {
       gsap.fromTo(
         introRef.current,
         { opacity: 0, y: 50 },
         {
-          opacity: 1,
-          y: 0,
-          duration: 1.2,
-          ease: "power4.out",
+          opacity: 1, y: 0, duration: 1.2, ease: "power4.out",
           onComplete: () => {
             setTimeout(() => {
               gsap.to(introRef.current, {
-                opacity: 0,
-                y: -50,
-                duration: 1,
-                ease: "power2.inOut",
+                opacity: 0, y: -50, duration: 1, ease: "power2.inOut",
                 onComplete: () => {
                   setShowIntro(false);
                   setStarted(true);
+                  // For the very first load, we don't need photos, just trigger the sequence.
+                  setIsSequenceReady(true);
                 },
               });
             }, 4500);
@@ -89,35 +91,19 @@ export default function HomePage() {
     }
   }, [showIntro]);
 
-  useEffect(() => {
-    if (started) {
-      setShowTravelText(false);
-      const timer = setTimeout(() => {
-        setShowTravelText(true);
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [selectedCity, started]);
-
   return (
     <div className="relative w-full h-screen overflow-hidden">
       <CityMap
-        center={{
-          lat: selectedCity.lat,
-          lng: selectedCity.lng,
-          zoom: 14,
-          name: selectedCity.name
-        }}
+        center={center} // 3. Pass the STABLE memoized object
+        onPlacesLoaded={handlePlacesLoaded}
       />
 
       {showIntro && (
-        <div
-          ref={introRef}
-          className="absolute inset-0 flex items-center justify-center bg-black/95 text-white z-50 px-4"
-        >
+        <div ref={introRef} className="absolute inset-0 flex items-center justify-center bg-black/95 text-white z-50 px-4">
           <TravelText
             active={true}
             destination="CityBreaker is your interactive travel dashboard. Explore cities, see local times, and dive into immersive flight-style transitions."
+            imageUrls={[]}
             onComplete={() => {}}
           />
         </div>
@@ -125,28 +111,15 @@ export default function HomePage() {
 
       {started && (
         <>
-          <AnimatedHeaderBoard
-            cities={cities}
-            onSelectCity={setSelectedCity}
-          />
-
+          <AnimatedHeaderBoard cities={cities} onSelectCity={handleSelectCity} />
           <ProgressBar />
-
-          {/* --- THIS IS THE CORRECTED BLOCK --- */}
           <TravelText
-            active={showTravelText}
+            active={isSequenceReady}
             destination={selectedCity.name}
-            onComplete={() => setShowTravelText(false)}
+            imageUrls={placePhotos}
+            onComplete={handleTravelTextComplete}
           />
-          {/* The stray brace has been removed from the line above */}
-
-          <div
-            className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow"
-            style={{
-              border: "2px solid white",
-              color: countryColors[selectedCity.name] || "#00ff00",
-            }}
-          >
+          <div className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow" style={{ /* ... */ }}>
             <div className="flex items-center gap-2">
               <SplitFlap text={selectedCity.name} />
             </div>

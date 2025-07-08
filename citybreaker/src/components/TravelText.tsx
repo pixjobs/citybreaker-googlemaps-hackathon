@@ -1,87 +1,102 @@
+// src/components/TravelText.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import gsap from "gsap";
 import { FaPlane, FaPassport, FaMapLocationDot } from "react-icons/fa6";
+import { AnimatePresence, motion } from "framer-motion";
 
-// --- Data structure for a single tip from our new API ---
-interface Tip {
-  icon: string;
-  title: string;
-  text: string;
-}
+// --- Data & Component Structures ---
+interface Tip { icon: string; title: string; text: string; }
 
-// --- NEW: A sub-component to animate a SINGLE tip ---
 const AnimatedTip = ({ tip }: { tip: Tip }) => {
   const tipRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     if (!tipRef.current) return;
-    const el = tipRef.current;
-
-    // Animate the letters of the tip's text
-    const textEl = el.querySelector(".tip-text");
-    if (textEl) {
-      textEl.innerHTML = tip.text
-        .split("")
-        .map((c) => `<span class="letter">${c}</span>`)
-        .join("");
-    }
-
-    const letterSpans = el.querySelectorAll<HTMLSpanElement>(".letter");
-    const tl = gsap.timeline();
-
-    // Animate the whole tip container in, then the letters
-    tl.fromTo(el, { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, duration: 0.6, ease: "power2.out" })
-      .fromTo(
-        letterSpans,
-        { autoAlpha: 0, y: 10 },
-        {
-          autoAlpha: 1,
-          y: 0,
-          duration: 0.5,
-          ease: "power1.out",
-          stagger: { amount: 1.0, each: 0.02 },
-        },
-        "-=0.3" // Start this animation slightly before the container finishes
-      );
-
-  }, [tip]); // Re-run this animation whenever the tip prop changes
-
+    gsap.fromTo(tipRef.current, { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: 0.8, ease: "power2.out" });
+  }, [tip]);
   return (
     <div ref={tipRef} className="invisible">
-      <h3 className="text-lg md:text-xl font-bold flex items-center justify-center gap-3 mb-2">
-        <span>{tip.icon}</span>
-        <span>{tip.title}</span>
-      </h3>
-      <p className="tip-text text-base md:text-lg text-yellow-300/90"></p>
+      <h3 className="text-lg md:text-xl font-bold flex items-center justify-center gap-3 mb-2">{tip.icon} {tip.title}</h3>
+      <p className="text-base md:text-lg text-yellow-300/90">{tip.text}</p>
     </div>
   );
 };
 
-// --- The main TravelText component, now acting as a controller ---
+const LoadingAnimation = ({ destination }: { destination: string }) => (
+  <div className="p-4 flex flex-col items-center justify-center">
+    <div className="relative w-16 h-16 mb-4">
+      <FaPlane className="text-4xl text-yellow-400 animate-pulse" />
+    </div>
+    <p>Gathering intel for {destination}...</p>
+  </div>
+);
+
+const BackgroundSlideshow = ({ imageUrls }: { imageUrls: string[] }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  useEffect(() => {
+    if (imageUrls.length < 2) return;
+    const interval = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % imageUrls.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [imageUrls]);
+
+  if (imageUrls.length === 0) return <div className="absolute inset-0 bg-black"></div>;
+
+  return (
+    <div className="absolute inset-0 -z-10 bg-black">
+      <AnimatePresence>
+        <motion.div
+          key={currentIndex}
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${imageUrls[currentIndex]})` }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: { duration: 2.0, ease: "easeInOut" } }}
+          exit={{ opacity: 0, transition: { duration: 2.0, ease: "easeInOut" } }}
+        />
+      </AnimatePresence>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+    </div>
+  );
+};
+
+// --- The Main TravelText Component ---
 export default function TravelText({
   active,
   destination,
+  imageUrls,
   onComplete,
 }: {
   active: boolean;
   destination: string;
+  imageUrls: string[];
   onComplete: () => void;
 }) {
+  const [scene, setScene] = useState<'initial' | 'loading' | 'intro' | 'tips' | 'finished'>('initial');
   const [tips, setTips] = useState<Tip[] | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [currentTipIndex, setCurrentTipIndex] = useState(0);
-  const mainTimelineRef = useRef<gsap.core.Timeline | null>(null);
+  const masterTimelineRef = useRef<gsap.core.Timeline | null>(null);
 
-  // Effect 1: Fetch data
+  const introTips = useMemo(() => ([{ 
+    icon: '✈️', 
+    title: 'Welcome', 
+    text: "CityBreaker is your interactive travel dashboard. Explore cities, see local times, and dive into immersive flight-style transitions." 
+  }]), []);
+
+  // Effect 1: Handles data fetching and scene transitions
   useEffect(() => {
-    if (active && destination) {
+    if (!active) {
+      setScene('initial');
+      return;
+    }
+    const isIntro = destination === introTips[0].text;
+    if (isIntro) {
+      setTips(introTips);
+      setScene('intro');
+    } else {
+      setScene('loading');
       const fetchTips = async () => {
-        setIsLoading(true);
-        setError(null);
-        setTips(null);
         try {
           const response = await fetch('/api/travel-tips', {
             method: 'POST',
@@ -90,61 +105,82 @@ export default function TravelText({
           });
           if (!response.ok) throw new Error('Failed to fetch tips.');
           const data = await response.json();
-          setTips(data.tips);
-        } catch (err: any) {
-          setError(err.message);
-        } finally {
-          setIsLoading(false);
+          const formattedTips: Tip[] = [
+            { icon: "✈️", title: "Airport Tip", text: data.tips.airportTip },
+            { icon: "🚇", title: "Transport Tip", text: data.tips.transportTip },
+            { icon: "💡", title: "Did You Know?", text: data.tips.funFact },
+          ];
+          setTips(formattedTips);
+          setScene('intro');
+        } catch (err) {
+          console.error(err);
+          setScene('finished');
+          onComplete();
         }
       };
       fetchTips();
     }
-  }, [active, destination]);
+  }, [active, destination, introTips, onComplete]);
 
-  // Effect 2: Control the overall lifecycle (cycling tips and final fade out)
+  // Effect 2: Handles ONLY animations based on the current scene
   useEffect(() => {
-    // Kill any previous timeline when props change
-    mainTimelineRef.current?.kill();
-
-    if (active && tips && !isLoading && !error) {
-      // Start cycling through tips
-      const cycleInterval = setInterval(() => {
-        setCurrentTipIndex((prevIndex) => (prevIndex + 1) % tips.length);
-      }, 5000); // Change tip every 5 seconds
-
-      // Create a master timeline to handle the final fade-out
-      const masterTl = gsap.timeline({
-        delay: 15, // Wait 15 seconds (3 tips * 5s each) before starting to fade out
-        onComplete: () => onComplete(),
+    masterTimelineRef.current?.kill();
+    if (scene === 'intro' && tips) {
+      const isIntroText = tips[0].text === introTips[0].text;
+      const introTl = gsap.timeline({
+        onComplete: () => {
+          if (isIntroText) {
+            setScene('finished');
+            onComplete();
+          } else {
+            setScene('tips');
+          }
+        },
       });
-      masterTl.to("#travel-text-container", { autoAlpha: 0, duration: 1, ease: "power2.inOut" });
-      mainTimelineRef.current = masterTl;
-
-      // Cleanup function
-      return () => {
-        clearInterval(cycleInterval);
-        mainTimelineRef.current?.kill();
-      };
+      introTl.fromTo("#intro-text", { autoAlpha: 0, scale: 0.8 }, { autoAlpha: 1, scale: 1, duration: 1, ease: "back.out" })
+             .to("#intro-text", { duration: isIntroText ? 3.5 : 2.5 })
+             .to("#intro-text", { autoAlpha: 0, scale: 0.8, duration: 0.5, ease: "power2.in" });
+      masterTimelineRef.current = introTl;
+    } else if (scene === 'tips' && tips) {
+      const tipCycleInterval = setInterval(() => {
+        setCurrentTipIndex((prev) => (prev + 1) % tips.length);
+      }, 5000);
+      const tipsTl = gsap.timeline({
+        delay: (tips.length * 5) + 1,
+        onComplete: () => {
+          setScene('finished');
+          onComplete();
+        },
+      });
+      tipsTl.to("#travel-text-container", { autoAlpha: 0, duration: 1 });
+      masterTimelineRef.current = tipsTl;
+      return () => clearInterval(tipCycleInterval);
     }
-  }, [active, tips, isLoading, error, onComplete]);
+  }, [scene, tips, introTips, onComplete]);
 
-  if (!active) return null;
+  if (scene === 'initial' || scene === 'finished') return null;
 
   const currentTip = tips?.[currentTipIndex];
+  const isIntroText = destination === introTips[0].text;
 
   return (
-    <div
-      id="travel-text-container"
-      className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/90 text-yellow-300 font-mono text-center z-50 pointer-events-none p-6 rounded-lg border-2 border-yellow-400 w-11/12 max-w-md"
-      style={{ lineHeight: "1.5" }}
-    >
-      {isLoading && <p>Brewing fresh travel tips for {destination}...</p>}
-      {error && <p className="text-red-500">Error: Could not fetch tips.</p>}
-      
-      {/* Render the AnimatedTip component only when we have a tip to show */}
-      {currentTip && (
-        <AnimatedTip key={currentTipIndex} tip={currentTip} />
-      )}
+    <div id="travel-text-container" className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      {!isIntroText && <BackgroundSlideshow imageUrls={imageUrls} />}
+      <div className="relative bg-black/50 text-yellow-300 font-mono text-center p-6 rounded-lg border-2 border-yellow-400 w-11/12 max-w-md backdrop-blur-md">
+        {scene === 'loading' && <LoadingAnimation destination={destination} />}
+        {scene === 'intro' && (
+          isIntroText ? (
+             <p id="intro-text" className="text-xl md:text-2xl invisible">{destination}</p>
+          ) : (
+            <h2 id="intro-text" className="text-3xl md:text-4xl font-bold invisible">
+              Welcome to <span className="text-yellow-400">{destination}</span>
+            </h2>
+          )
+        )}
+        {scene === 'tips' && currentTip && (
+          <AnimatedTip key={currentTipIndex} tip={currentTip} />
+        )}
+      </div>
     </div>
   );
 }

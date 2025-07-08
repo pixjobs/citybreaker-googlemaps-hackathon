@@ -6,7 +6,7 @@ import { FaMapMarkedAlt, FaTimes } from "react-icons/fa";
 
 // Local Component Imports
 import ItineraryPanel from "./ItineraryPanel";
-import LocationMenuPopup, { RichPlaceDetails, YouTubeVideo } from "./LocationMenuPopup"; // Import YouTubeVideo type
+import LocationMenuPopup, { RichPlaceDetails, YouTubeVideo } from "./LocationMenuPopup";
 import { useMaps } from "./providers/MapsProvider";
 
 // --- Data Structures & Helpers ---
@@ -18,9 +18,11 @@ interface BasicPlaceInfo {
 interface CityMapProps {
   center: { lat: number; lng: number; zoom: number; name: string; };
   tripLength?: number;
+  // --- NEW: A callback prop to send photo URLs to the parent component ---
+  onPlacesLoaded?: (photoUrls: string[]) => void;
 }
 interface PlacePhotoInfo {
-  name: string;
+  name:string;
   photoUrl?: string;
 }
 function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement>, isOpen: boolean) {
@@ -44,24 +46,22 @@ function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement>, isOpen: boo
 
 // --- Main CityMap Component ---
 
-export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
+export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: CityMapProps) {
   const { isLoaded } = useMaps();
   const mapRef = useRef<google.maps.Map | null>(null);
   const panelContainerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   
-  // State for Itinerary Panel
   const [itinerary, setItinerary] = useState<string | null>(null);
   const [placePhotos, setPlacePhotos] = useState<PlacePhotoInfo[]>([]);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   
-  // --- UPDATED: State for Location Popup now includes videos ---
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [isDetailsLoading, setIsDetailsLoading] = useState(false);
-  const [isVideosLoading, setIsVideosLoading] = useState(false); // New loading state for videos
+  const [isVideosLoading, setIsVideosLoading] = useState(false);
   const [selectedPlaceBasic, setSelectedPlaceBasic] = useState<BasicPlaceInfo | undefined>();
   const [selectedPlaceDetails, setSelectedPlaceDetails] = useState<RichPlaceDetails | undefined>();
-  const [youtubeVideos, setYoutubeVideos] = useState<YouTubeVideo[]>([]); // New state for videos
+  const [youtubeVideos, setYoutubeVideos] = useState<YouTubeVideo[]>([]);
   const [activeTab, setActiveTab] = useState<"info" | "reviews" | "videos">("info");
 
   const [isLoading, setIsLoading] = useState(false);
@@ -79,9 +79,8 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
   const fetchAndShowPlaceDetails = (placeId: string) => {
     if (!mapRef.current) return;
 
-    // Reset all states for the new popup
     setIsDetailsLoading(true);
-    setIsVideosLoading(true); // Start both loading states
+    setIsVideosLoading(true);
     setIsPopupOpen(true);
     setSelectedPlaceBasic(undefined);
     setSelectedPlaceDetails(undefined);
@@ -90,7 +89,6 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
 
     const placesService = new window.google.maps.places.PlacesService(mapRef.current!);
     
-    // --- Step 1: Fetch Google Place Details ---
     placesService.getDetails(
       {
         placeId: placeId,
@@ -109,9 +107,8 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
             reviews: placeDetails.reviews,
             editorial_summary: placeDetails.editorial_summary,
           });
-          setIsDetailsLoading(false); // Main details are loaded
+          setIsDetailsLoading(false);
 
-          // --- Step 2: NOW, FETCH YOUTUBE VIDEOS using our new API route ---
           try {
             const res = await fetch('/api/youtube-search', {
               method: 'POST',
@@ -123,9 +120,9 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
             setYoutubeVideos(data.videos);
           } catch (error) {
             console.error(error);
-            setYoutubeVideos([]); // Ensure it's an empty array on failure
+            setYoutubeVideos([]);
           } finally {
-            setIsVideosLoading(false); // Videos are loaded (or have failed)
+            setIsVideosLoading(false);
           }
 
         } else {
@@ -139,8 +136,6 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
   };
 
   useEffect(() => {
-    // This useEffect for map initialization and nearbySearch is UNCHANGED.
-    // It correctly sets up the map and the triggers.
     if (!isLoaded || !window.google || !window.google.maps || !window.google.maps.Map) {
       return;
     }
@@ -203,6 +198,16 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
           
           setPlacePhotos(photoInfoForItinerary);
 
+          // --- NEW: Gather and send photo URLs for the slideshow ---
+          const photoUrlsForSlideshow = results
+            .map(place => place.photos?.[0]?.getUrl({ maxWidth: 1920, maxHeight: 1080 }))
+            .filter((url): url is string => !!url); // Filter out any undefined URLs
+
+          // Call the callback prop to send the data to the parent component
+          if (onPlacesLoaded) {
+            onPlacesLoaded(photoUrlsForSlideshow);
+          }
+
           results.forEach(place => {
             if (!place.geometry?.location || !place.name || !place.place_id) return;
 
@@ -237,13 +242,12 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
     };
 
     initAndFetch();
-  }, [isLoaded, cityKey, center]);
+  }, [isLoaded, cityKey, center, onPlacesLoaded]); // Added onPlacesLoaded to dependency array
 
   return (
     <>
       <div id="map" className="absolute inset-0 z-0" />
 
-      {/* --- UPDATED: Pass the new video props to the popup --- */}
       <LocationMenuPopup
         isOpen={isPopupOpen}
         onClose={() => setIsPopupOpen(false)}
