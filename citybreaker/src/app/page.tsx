@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import gsap from "gsap";
 import CityMap from "@/components/CityMap";
 import TravelText from "@/components/TravelText";
-import FABMenu from "@/components/FABMenu";
 import ProgressBar from "@/components/ProgressBar";
 import SplitFlap from "@/components/SplitFlap";
 import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard";
@@ -132,7 +131,6 @@ export default function HomePage() {
             }}
           />
 
-          <FABMenu />
           <ProgressBar />
 
           <TravelText
