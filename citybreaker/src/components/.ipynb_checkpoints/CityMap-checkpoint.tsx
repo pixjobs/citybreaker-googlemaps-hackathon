@@ -6,50 +6,23 @@ import { FaMapMarkedAlt, FaTimes } from "react-icons/fa";
 
 // Local Component Imports
 import ItineraryPanel from "./ItineraryPanel";
-import LocationMenuPopup from "./LocationMenuPopup";
-import { useMaps } from "./providers/MapsProvider"; // Using our central provider
+import LocationMenuPopup, { RichPlaceDetails, YouTubeVideo } from "./LocationMenuPopup"; // Import YouTubeVideo type
+import { useMaps } from "./providers/MapsProvider";
 
-// --- Data Structures & Helper Functions ---
-
-// Defines the shape of data our LocationMenuPopup component expects.
-interface PlaceDetail {
+// --- Data Structures & Helpers ---
+interface BasicPlaceInfo {
   name: string;
   address: string;
-  website?: string;
   photoUrl?: string;
-  description?: string;
 }
-
-// Converts the raw data from Google's API into the clean `PlaceDetail` format.
-// This acts as an "adapter" and keeps our components decoupled.
-function convertPlaceResultToPlaceDetail(place: google.maps.places.PlaceResult): PlaceDetail {
-  return {
-    name: place.name || "Unnamed Place",
-    address: place.vicinity || "Address not available",
-    website: place.website,
-    photoUrl: place.photos?.[0]?.getUrl({ maxWidth: 800, maxHeight: 600 }),
-    description: place.types?.map(t => t.replace(/_/g, ' ')).join(', '),
-  };
-}
-
-// Defines the props for the main CityMap component.
 interface CityMapProps {
-  center: {
-    lat: number;
-    lng: number;
-    zoom: number;
-    name: string;
-  };
+  center: { lat: number; lng: number; zoom: number; name: string; };
   tripLength?: number;
 }
-
-// Defines the shape of data needed for the ItineraryPanel's photo list.
 interface PlacePhotoInfo {
   name: string;
   photoUrl?: string;
 }
-
-// A custom hook to manage the GSAP animation for the side panel.
 function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement>, isOpen: boolean) {
   useEffect(() => {
     if (!panelRef.current) return;
@@ -69,38 +42,33 @@ function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement>, isOpen: boo
   }, [isOpen, panelRef]);
 }
 
-
 // --- Main CityMap Component ---
 
 export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
-  // Get the map loading status from our central provider.
   const { isLoaded } = useMaps();
-
-  // Refs to hold mutable objects that persist across renders.
   const mapRef = useRef<google.maps.Map | null>(null);
   const panelContainerRef = useRef<HTMLDivElement>(null);
-  const polylineRef = useRef<google.maps.Polyline | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
-
-  // State for the Itinerary Panel
+  
+  // State for Itinerary Panel
   const [itinerary, setItinerary] = useState<string | null>(null);
   const [placePhotos, setPlacePhotos] = useState<PlacePhotoInfo[]>([]);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   
-  // State for the Location Menu Popup (the modal)
+  // --- UPDATED: State for Location Popup now includes videos ---
   const [isPopupOpen, setIsPopupOpen] = useState(false);
-  const [selectedPlace, setSelectedPlace] = useState<google.maps.places.PlaceResult | null>(null);
-  const [allPlaces, setAllPlaces] = useState<google.maps.places.PlaceResult[]>([]);
-  const [activeTab, setActiveTab] = useState<"info" | "nearby">("info");
+  const [isDetailsLoading, setIsDetailsLoading] = useState(false);
+  const [isVideosLoading, setIsVideosLoading] = useState(false); // New loading state for videos
+  const [selectedPlaceBasic, setSelectedPlaceBasic] = useState<BasicPlaceInfo | undefined>();
+  const [selectedPlaceDetails, setSelectedPlaceDetails] = useState<RichPlaceDetails | undefined>();
+  const [youtubeVideos, setYoutubeVideos] = useState<YouTubeVideo[]>([]); // New state for videos
+  const [activeTab, setActiveTab] = useState<"info" | "reviews" | "videos">("info");
 
-  // General state
   const [isLoading, setIsLoading] = useState(false);
   const cityKey = `${center.lat}-${center.lng}-${tripLength}`;
 
-  // Initialize the panel animation hook.
   useAnimatedPanel(panelContainerRef, isPanelOpen);
 
-  // Effect to pan the map when the center prop changes.
   useEffect(() => {
     if (mapRef.current) {
       mapRef.current.panTo(center);
@@ -108,11 +76,71 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
     }
   }, [center]);
 
-  // The main effect for initializing the map and fetching data.
+  const fetchAndShowPlaceDetails = (placeId: string) => {
+    if (!mapRef.current) return;
+
+    // Reset all states for the new popup
+    setIsDetailsLoading(true);
+    setIsVideosLoading(true); // Start both loading states
+    setIsPopupOpen(true);
+    setSelectedPlaceBasic(undefined);
+    setSelectedPlaceDetails(undefined);
+    setYoutubeVideos([]);
+    setActiveTab("info");
+
+    const placesService = new window.google.maps.places.PlacesService(mapRef.current!);
+    
+    // --- Step 1: Fetch Google Place Details ---
+    placesService.getDetails(
+      {
+        placeId: placeId,
+        fields: ["name", "vicinity", "photos", "website", "rating", "reviews", "editorial_summary"],
+      },
+      async (placeDetails, status) => {
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && placeDetails) {
+          setSelectedPlaceBasic({
+            name: placeDetails.name || "Unnamed Place",
+            address: placeDetails.vicinity || "Address not available",
+            photoUrl: placeDetails.photos?.[0]?.getUrl({ maxWidth: 800, maxHeight: 600 }),
+          });
+          setSelectedPlaceDetails({
+            website: placeDetails.website,
+            rating: placeDetails.rating,
+            reviews: placeDetails.reviews,
+            editorial_summary: placeDetails.editorial_summary,
+          });
+          setIsDetailsLoading(false); // Main details are loaded
+
+          // --- Step 2: NOW, FETCH YOUTUBE VIDEOS using our new API route ---
+          try {
+            const res = await fetch('/api/youtube-search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: placeDetails.name }),
+            });
+            if (!res.ok) throw new Error('YouTube search failed');
+            const data = await res.json();
+            setYoutubeVideos(data.videos);
+          } catch (error) {
+            console.error(error);
+            setYoutubeVideos([]); // Ensure it's an empty array on failure
+          } finally {
+            setIsVideosLoading(false); // Videos are loaded (or have failed)
+          }
+
+        } else {
+          console.error("Place Details request failed with status:", status);
+          setIsPopupOpen(false);
+          setIsDetailsLoading(false);
+          setIsVideosLoading(false);
+        }
+      }
+    );
+  };
+
   useEffect(() => {
-    // This is a critical guard clause. It prevents any map code from running until
-    // the Google script is fully loaded AND the Map object is available on the window.
-    // This solves the "Map is not a constructor" error.
+    // This useEffect for map initialization and nearbySearch is UNCHANGED.
+    // It correctly sets up the map and the triggers.
     if (!isLoaded || !window.google || !window.google.maps || !window.google.maps.Map) {
       return;
     }
@@ -121,15 +149,30 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
       setIsLoading(true);
       setItinerary(null);
       setPlacePhotos([]);
-      setAllPlaces([]);
 
-      // Initialize the map only once.
       if (!mapRef.current && document.getElementById("map")) {
         mapRef.current = new window.google.maps.Map(document.getElementById("map") as HTMLElement, {
           center,
           zoom: center.zoom,
           disableDefaultUI: true,
-          styles: [ /* Your map styles... */ ],
+          styles: [
+            { elementType: "geometry", stylers: [{ color: "#1d2c4d" }] },
+            { elementType: "labels.text.fill", stylers: [{ color: "#8ec3b9" }] },
+            { elementType: "labels.text.stroke", stylers: [{ color: "#1a3646" }] },
+            { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#14546a" }] },
+            { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#023e58" }] },
+            { featureType: "poi", elementType: "geometry", stylers: [{ color: "#0c4152" }] },
+            { featureType: "road", elementType: "geometry", stylers: [{ color: "#00ff90" }] },
+            { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#ffffff" }] },
+            { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e1626" }] },
+          ],
+        });
+
+        mapRef.current.addListener('click', (e: google.maps.MapMouseEvent) => {
+          if (e.placeId) {
+            e.stop();
+            fetchAndShowPlaceDetails(e.placeId);
+          }
         });
       }
 
@@ -148,19 +191,20 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
             return;
           }
 
-          setAllPlaces(results);
-
-          // Clear old markers and lines from the map before adding new ones.
           markersRef.current.forEach(m => m.setMap(null));
           markersRef.current = [];
-          polylineRef.current?.setMap(null);
-
-          const photoInfo: PlacePhotoInfo[] = [];
-          const pathCoords: google.maps.LatLngLiteral[] = [];
+          
+          const photoInfoForItinerary: PlacePhotoInfo[] = results
+            .map(place => ({
+              name: place.name || '',
+              photoUrl: place.photos?.[0]?.getUrl(),
+            }))
+            .filter(p => p.name);
+          
+          setPlacePhotos(photoInfoForItinerary);
 
           results.forEach(place => {
-            if (!place.geometry?.location || !place.name) return;
-            pathCoords.push(place.geometry.location.toJSON());
+            if (!place.geometry?.location || !place.name || !place.place_id) return;
 
             const marker = new window.google.maps.Marker({
               position: place.geometry.location,
@@ -169,41 +213,19 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
             });
             markersRef.current.push(marker);
 
-            // --- THIS IS THE TRIGGER ---
-            // An event listener is attached to each marker. When clicked, it updates
-            // the state to open the LocationMenuPopup with the correct place data.
-            marker.addListener('click', () => {
-              setSelectedPlace(place);
-              setIsPopupOpen(true);
-              setActiveTab("info");
-            });
-
-            photoInfo.push({ name: place.name, photoUrl: place.photos?.[0]?.getUrl() });
+            const placeId = place.place_id;
+            marker.addListener('click', () => fetchAndShowPlaceDetails(placeId));
           });
 
-          setPlacePhotos(photoInfo);
-
-          polylineRef.current = new window.google.maps.Polyline({
-            path: pathCoords,
-            geodesic: true,
-            strokeColor: '#00ff90',
-            strokeOpacity: 0.8,
-            strokeWeight: 4,
-            map: mapRef.current!,
-          });
-
-          // Fetch the itinerary from the backend API.
           try {
             const res = await fetch("/api/gemini-recommendations", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ places: photoInfo, tripLength }),
+              body: JSON.stringify({ places: photoInfoForItinerary, tripLength }),
             });
             if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
             const data = await res.json();
             setItinerary(data.itinerary);
-            // NOTE: We intentionally DO NOT open the panel automatically.
-            // The user will open it with the button.
           } catch (err) {
             console.error("Itinerary generation failed:", err);
             setItinerary(`Error: Could not generate itinerary for ${center.name}.`);
@@ -221,21 +243,19 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
     <>
       <div id="map" className="absolute inset-0 z-0" />
 
-      {/* The Landmark/Restaurant Modal Popup */}
+      {/* --- UPDATED: Pass the new video props to the popup --- */}
       <LocationMenuPopup
         isOpen={isPopupOpen}
         onClose={() => setIsPopupOpen(false)}
-        type="landmark"
-        place={selectedPlace ? convertPlaceResultToPlaceDetail(selectedPlace) : undefined}
-        nearby={allPlaces
-          .filter(p => p.place_id !== selectedPlace?.place_id)
-          .map(convertPlaceResultToPlaceDetail)
-        }
+        place={selectedPlaceBasic}
+        details={selectedPlaceDetails}
+        youtubeVideos={youtubeVideos}
+        isLoading={isDetailsLoading}
+        isVideosLoading={isVideosLoading}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
       />
 
-      {/* The Floating Action Button to toggle the Itinerary Panel */}
       <button
         onClick={() => setIsPanelOpen(!isPanelOpen)}
         className="fixed bottom-6 right-6 md:bottom-10 md:right-10 z-30 bg-yellow-500 text-black p-4 rounded-full shadow-lg hover:bg-yellow-400 active:scale-95 transition-all"
@@ -244,7 +264,6 @@ export default function CityMap({ center, tripLength = 3 }: CityMapProps) {
         {isPanelOpen ? <FaTimes size={24} /> : <FaMapMarkedAlt size={24} />}
       </button>
 
-      {/* The Itinerary Panel that slides in from the side */}
       <div
         ref={panelContainerRef}
         className="fixed inset-0 z-20 opacity-0 pointer-events-none"

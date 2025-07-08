@@ -1,33 +1,69 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { X } from "lucide-react";
+import { X, Star, Globe, Youtube } from "lucide-react"; // Added Youtube icon
 import React from "react";
 
-interface PlaceDetail {
-  name: string;
-  address: string;
-  website?: string;
-  photoUrl?: string;
-  description?: string;
+// --- Define Data Structures ---
+
+interface Review {
+  author_name: string;
+  rating: number;
+  relative_time_description: string;
+  text: string;
+  profile_photo_url: string;
 }
 
+export interface RichPlaceDetails {
+  website?: string;
+  rating?: number;
+  reviews?: Review[];
+  editorial_summary?: { overview?: string };
+}
+
+// --- NEW: Interface for a single YouTube video ---
+export interface YouTubeVideo {
+  id?: string;
+  title?: string;
+  thumbnail?: string;
+  channelTitle?: string;
+}
+
+// --- UPDATED: Props now include video data and new states ---
 interface LocationMenuPopupProps {
   isOpen: boolean;
   onClose: () => void;
-  type: "landmark" | "restaurant";
-  place?: PlaceDetail;
-  nearby: PlaceDetail[];
-  activeTab: "info" | "nearby";
-  setActiveTab: (tab: "info" | "nearby") => void;
+  place?: { name: string; address: string; photoUrl?: string };
+  details?: RichPlaceDetails;
+  youtubeVideos?: YouTubeVideo[];
+  isLoading: boolean; // For main details
+  isVideosLoading: boolean; // Separate loading state for videos
+  activeTab: "info" | "reviews" | "videos"; // Added "videos"
+  setActiveTab: (tab: "info" | "reviews" | "videos") => void;
 }
+
+// A simple component to render star ratings
+const StarRating = ({ rating }: { rating: number }) => (
+  <div className="flex items-center">
+    {[...Array(5)].map((_, i) => (
+      <Star
+        key={i}
+        size={16}
+        className={i < Math.round(rating) ? "text-yellow-400 fill-yellow-400" : "text-gray-400"}
+      />
+    ))}
+    <span className="ml-2 text-sm font-bold text-white">{rating.toFixed(1)}</span>
+  </div>
+);
 
 export default function LocationMenuPopup({
   isOpen,
   onClose,
-  type,
   place,
-  nearby,
+  details,
+  youtubeVideos,
+  isLoading,
+  isVideosLoading,
   activeTab,
   setActiveTab,
 }: LocationMenuPopupProps) {
@@ -35,105 +71,144 @@ export default function LocationMenuPopup({
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          className="fixed inset-0 bg-black/40 backdrop-blur-md z-[200] flex justify-center items-center p-4"
+          className="fixed inset-0 bg-black/60 backdrop-blur-md z-[200] flex justify-center items-center p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
         >
           <motion.div
-            className="relative w-full max-w-md rounded-3xl bg-white/20 backdrop-blur-2xl border border-white/30 shadow-2xl p-6 text-white"
+            className="relative w-full max-w-md rounded-3xl bg-slate-800/80 backdrop-blur-2xl border border-white/20 shadow-2xl p-6 text-white"
             initial={{ scale: 0.95, y: 20 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 20 }}
             transition={{ type: "spring", stiffness: 200, damping: 25 }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Close Button */}
             <button
-              className="absolute top-4 right-4 text-white/70 hover:text-white"
+              className="absolute top-4 right-4 text-white/70 hover:text-white z-10"
               onClick={onClose}
               aria-label="Close"
             >
               <X size={24} />
             </button>
 
-            <h2 className="text-2xl font-bold mb-4">
-              {type === "landmark" ? "Landmark Info" : "Restaurant Info"}
-            </h2>
+            {place && (
+              <div className="mb-4">
+                <h2 className="text-2xl font-bold text-yellow-400">{place.name}</h2>
+                <p className="text-sm text-white/60">{place.address}</p>
+              </div>
+            )}
 
-            {/* Tabs */}
+            {/* --- UPDATED: Tabs with new "Videos" option --- */}
             <div className="flex border-b border-white/30 mb-4">
               <button
-                className={`px-4 py-2 text-sm font-semibold transition rounded-t-md ${activeTab === "info" ? "bg-yellow-300 text-black" : "text-white hover:text-yellow-300"}`}
+                className={`px-4 py-2 text-sm font-semibold transition rounded-t-md ${activeTab === "info" ? "bg-yellow-300 text-black" : "text-white/70 hover:text-white"}`}
                 onClick={() => setActiveTab("info")}
               >
                 Info
               </button>
               <button
-                className={`ml-2 px-4 py-2 text-sm font-semibold transition rounded-t-md ${activeTab === "nearby" ? "bg-yellow-300 text-black" : "text-white hover:text-yellow-300"}`}
-                onClick={() => setActiveTab("nearby")}
+                className={`ml-2 px-4 py-2 text-sm font-semibold transition rounded-t-md ${activeTab === "reviews" ? "bg-yellow-300 text-black" : "text-white/70 hover:text-white"}`}
+                onClick={() => setActiveTab("reviews")}
+                disabled={isLoading || !details?.reviews}
               >
-                Nearby
+                Reviews
+              </button>
+              <button
+                className={`ml-2 px-4 py-2 text-sm font-semibold transition rounded-t-md ${activeTab === "videos" ? "bg-yellow-300 text-black" : "text-white/70 hover:text-white"}`}
+                onClick={() => setActiveTab("videos")}
+                disabled={isLoading} // Only disable while main details are loading
+              >
+                Videos
               </button>
             </div>
 
-            {/* Info Tab */}
-            {activeTab === "info" && place && (
-              <div className="space-y-2">
-                {place.photoUrl && (
-                  <img
-                    src={place.photoUrl}
-                    alt={place.name}
-                    className="w-full rounded-xl"
-                  />
-                )}
-                <h3 className="text-xl font-bold">{place.name}</h3>
-                <p className="text-sm text-white/80">{place.address}</p>
-                {place.description ? (
-                  <p className="text-sm italic text-white/60">{place.description}</p>
-                ) : (
-                  <p className="text-sm italic text-white/40">(No description available)</p>
-                )}
-                {place.website && (
-                  <a
-                    href={place.website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-300 underline text-sm"
-                  >
-                    Visit official site
-                  </a>
-                )}
-              </div>
-            )}
+            {/* Main Content Area */}
+            <div className="min-h-[200px] max-h-[50vh] overflow-y-auto pr-2">
+              {isLoading ? (
+                <div className="flex justify-center items-center h-full">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-400"></div>
+                </div>
+              ) : (
+                <>
+                  {activeTab === "info" && (
+                    <div className="space-y-4">
+                      {place?.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-full h-48 object-cover rounded-xl" />}
+                      {details?.rating && <StarRating rating={details.rating} />}
+                      {details?.editorial_summary?.overview && (
+                        <div>
+                          <h4 className="font-bold text-white mb-1">About this place</h4>
+                          <p className="text-sm text-white/80 leading-relaxed">{details.editorial_summary.overview}</p>
 
-            {/* Nearby Tab */}
-            {activeTab === "nearby" && (
-              <ul className="space-y-3 max-h-60 overflow-y-auto">
-                {nearby.length === 0 ? (
-                  <li className="text-sm text-white/60 italic">No nearby places found.</li>
-                ) : (
-                  nearby.map((place, idx) => (
-                    <li
-                      key={idx}
-                      className="bg-white/10 p-3 rounded-xl border border-white/20 hover:bg-white/20 transition"
-                    >
-                      <p className="text-sm font-semibold">{place.name}</p>
-                      <p className="text-xs text-white/70">{place.address}</p>
-                    </li>
-                  ))
-                )}
-              </ul>
-            )}
+                        </div>
+                      )}
+                      {details?.website && (
+                        <a href={details.website} target="_blank" rel="noopener noreferrer" className="flex items-center text-blue-300 underline hover:text-blue-200">
+                          <Globe size={16} className="mr-2" />
+                          Visit Official Website
+                        </a>
+                      )}
+                    </div>
+                  )}
 
-            <div className="mt-4">
-              <button
-                onClick={onClose}
-                className="w-full bg-yellow-400 text-black py-2 px-4 rounded-xl hover:bg-yellow-300 transition"
-              >
-                Close
-              </button>
+                  {activeTab === "reviews" && (
+                    <ul className="space-y-4">
+                      {details?.reviews && details.reviews.length > 0 ? (
+                        details.reviews.map((review, idx) => (
+                          <li key={idx} className="bg-white/10 p-3 rounded-xl border border-white/20">
+                            <div className="flex items-center mb-2">
+                              <img src={review.profile_photo_url} alt={review.author_name} className="w-10 h-10 rounded-full mr-3" />
+                              <div>
+                                <p className="font-semibold">{review.author_name}</p>
+                                <StarRating rating={review.rating} />
+                              </div>
+                              <p className="ml-auto text-xs text-white/60">{review.relative_time_description}</p>
+                            </div>
+                            <p className="text-sm text-white/90">{review.text}</p>
+                          </li>
+                        ))
+                      ) : (
+                        <li className="text-sm text-white/60 italic">No reviews available.</li>
+                      )}
+                    </ul>
+                  )}
+
+                  {/* --- NEW: Videos Tab Content --- */}
+                  {activeTab === "videos" && (
+                    <div>
+                      {isVideosLoading ? (
+                        <div className="flex justify-center items-center h-full pt-8">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-400"></div>
+                        </div>
+                      ) : (
+                        <ul className="space-y-4">
+                          {youtubeVideos && youtubeVideos.length > 0 ? (
+                            youtubeVideos.map((video) => (
+                              <li key={video.id}>
+                                <a
+                                  href={`https://www.youtube.com/watch?v=${video.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center bg-white/10 p-2 rounded-xl border border-transparent hover:border-yellow-400 transition-all group"
+                                >
+                                  <img src={video.thumbnail} alt={video.title} className="w-24 h-16 object-cover rounded-md mr-4" />
+                                  <div className="flex-1">
+                                    <p className="font-semibold text-sm leading-tight group-hover:text-yellow-300 transition-colors">{video.title}</p>
+                                    <p className="text-xs text-white/60 mt-1">{video.channelTitle}</p>
+                                  </div>
+                                </a>
+                              </li>
+                            ))
+                          ) : (
+                            <li className="text-sm text-white/60 italic">No relevant videos found.</li>
+                          )}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </motion.div>
         </motion.div>
