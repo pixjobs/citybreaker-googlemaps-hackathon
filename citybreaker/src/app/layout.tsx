@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+// --- 1. Import the MapsProvider you created ---
+import { MapsProvider } from "@/components/providers/MapsProvider";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -27,7 +30,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white text-gray-900`}
       >
-        {children}
+        {/* --- 2. Wrap your {children} with the MapsProvider --- */}
+        {/* This ensures the Google Maps script is loaded once for all pages */}
+        <MapsProvider>
+          {children}
+        </MapsProvider>
       </body>
     </html>
   );
