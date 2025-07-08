@@ -39,6 +39,7 @@ export default function AnimatedHeaderBoard({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -47,31 +48,51 @@ export default function AnimatedHeaderBoard({
       gsap.fromTo(
         containerRef.current,
         { y: -100, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: 1,
-          ease: "power4.out",
-        }
+        { y: 0, opacity: 1, duration: 1, ease: "power4.out" }
       );
     }
   }, []);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    if (menuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [menuOpen]);
+
   const toggleBoard = () => {
-    setExpanded((prev) => !prev);
+    const isCurrentlyExpanded = !expanded;
+    setExpanded(isCurrentlyExpanded);
+
     if (boardRef.current) {
       gsap.to(boardRef.current, {
-        height: expanded ? 0 : "auto",
-        opacity: expanded ? 0 : 1,
+        height: isCurrentlyExpanded ? "auto" : 0,
+        opacity: isCurrentlyExpanded ? 1 : 0,
         duration: 0.5,
         ease: "power2.out",
         onStart: () => {
-          if (!expanded) boardRef.current!.style.display = "block";
+          if (isCurrentlyExpanded) boardRef.current!.style.display = "block";
         },
         onComplete: () => {
-          if (expanded) boardRef.current!.style.display = "none";
+          if (!isCurrentlyExpanded) boardRef.current!.style.display = "none";
         },
       });
+    }
+  };
+
+  const handleCitySelectAndClose = (city: City) => {
+    onSelectCity(city);
+    if (expanded) {
+      toggleBoard();
     }
   };
 
@@ -104,21 +125,20 @@ export default function AnimatedHeaderBoard({
       <div className="flex items-center justify-between px-4 py-2">
         <div className="flex items-center gap-3">
           <CityBreakerLogo />
-          <span className="font-bold text-lg hidden sm:inline"></span>
         </div>
 
         <div className="flex items-center gap-4">
           <button
             onClick={toggleBoard}
-            className="text-xs sm:text-sm border border-yellow-400 px-3 py-1 rounded hover:bg-yellow-600/20"
+            className="text-xs sm:text-sm border border-yellow-400 px-3 py-1 rounded hover:bg-yellow-600/20 transition-colors"
           >
             {expanded ? "Hide Cities ▲" : "Show Cities ▼"}
           </button>
 
-          <div className="relative">
+          <div ref={menuRef} className="relative">
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              className="border border-yellow-400 px-3 py-1 rounded hover:bg-yellow-600/20"
+              className="border border-yellow-400 p-1 rounded hover:bg-yellow-600/20 transition-colors"
             >
               {menuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
@@ -129,13 +149,14 @@ export default function AnimatedHeaderBoard({
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-0 mt-2 bg-black border border-yellow-400 text-yellow-200 rounded shadow-lg z-50 min-w-[180px]"
+                  transition={{ duration: 0.2 }}
+                  className="absolute right-0 mt-2 bg-black border border-yellow-400 text-yellow-200 rounded shadow-lg z-50 min-w-[180px] overflow-hidden"
                 >
                   {menuItems.map((item) => (
                     <button
                       key={item.label}
                       onClick={() => handleItemClick(item.action)}
-                      className="w-full flex items-center gap-2 px-4 py-2 hover:bg-yellow-600/20 text-left"
+                      className="w-full flex items-center gap-2 px-4 py-2 hover:bg-yellow-600/20 text-left transition-colors"
                     >
                       {item.icon}
                       <span className="text-sm">{item.label}</span>
@@ -153,7 +174,10 @@ export default function AnimatedHeaderBoard({
         style={{ height: 0, overflow: "hidden", display: "none", opacity: 0 }}
         className="px-4 pb-3"
       >
-        <SplitFlapBoard cities={cities} onSelectCity={onSelectCity} />
+        <SplitFlapBoard
+          cities={cities}
+          onSelectCity={handleCitySelectAndClose}
+        />
       </div>
     </header>
   );

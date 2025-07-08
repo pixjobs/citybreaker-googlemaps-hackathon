@@ -8,30 +8,22 @@ import ProgressBar from "@/components/ProgressBar";
 import SplitFlap from "@/components/SplitFlap";
 import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard";
 
+// It's good practice to define types outside the component
+interface City {
+  name: string;
+  timezone: string;
+  lat: number;
+  lng: number;
+}
+
 export default function HomePage() {
-  const [started, setStarted] = useState(false);
-  const [showIntro, setShowIntro] = useState(true);
-  const [currentCityName, setCurrentCityName] = useState<string>("London");
-  const [showTravelText, setShowTravelText] = useState(false);
-  const introRef = useRef<HTMLDivElement>(null);
-
-  const countryColors: Record<string, string> = {
-    London: "#ff0000",
-    Paris: "#0055A4",
-    Berlin: "#000000",
-    Prague: "#D7141A",
-    Beijing: "#ffde00",
-    Seoul: "#003478",
-    Tokyo: "#bc002d",
-    "San Francisco": "#b22222",
-    "New York": "#3c3b6e",
-  };
-
-  const cities = [
-    { name: "London", timezone: "Europe/London", lat: 51.5, lng: -0.12 },
+  // --- Data Configuration ---
+  const cities: City[] = [
+    { name: "London", timezone: "Europe/London", lat: 51.5074, lng: -0.1278 },
     { name: "Paris", timezone: "Europe/Paris", lat: 48.8566, lng: 2.3522 },
     { name: "Berlin", timezone: "Europe/Berlin", lat: 52.52, lng: 13.405 },
     { name: "Prague", timezone: "Europe/Prague", lat: 50.0755, lng: 14.4378 },
+    { name: "Dubai", timezone: "Asia/Dubai", lat: 25.2048, lng: 55.2708 }, // Dubai Added
     { name: "Beijing", timezone: "Asia/Shanghai", lat: 39.9042, lng: 116.4074 },
     { name: "Tokyo", timezone: "Asia/Tokyo", lat: 35.6895, lng: 139.6917 },
     { name: "Seoul", timezone: "Asia/Seoul", lat: 37.5665, lng: 126.978 },
@@ -39,14 +31,32 @@ export default function HomePage() {
     { name: "San Francisco", timezone: "America/Los_Angeles", lat: 37.7749, lng: -122.4194 },
   ];
 
-  const cityTimezones: Record<string, string> = Object.fromEntries(
-    cities.map((c) => [c.name, c.timezone])
-  );
+  const countryColors: Record<string, string> = {
+    London: "#ff0000",
+    Paris: "#0055A4",
+    Berlin: "#000000",
+    Prague: "#D7141A",
+    Dubai: "#FFC300", // Dubai Color Added
+    Beijing: "#ffde00",
+    Seoul: "#003478",
+    Tokyo: "#bc002d",
+    "San Francisco": "#b22222",
+    "New York": "#3c3b6e",
+  };
 
-  const getCityTime = (name: string) => {
+  // --- State Management ---
+  const [started, setStarted] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
+  const [showTravelText, setShowTravelText] = useState(false);
+  // This is the single source of truth for the selected city
+  const [selectedCity, setSelectedCity] = useState<City>(cities[0]);
+  const introRef = useRef<HTMLDivElement>(null);
+
+  // --- Helper Functions ---
+  const getCityTime = (timezone: string) => {
     try {
       return new Intl.DateTimeFormat("en-GB", {
-        timeZone: cityTimezones[name] || "UTC",
+        timeZone: timezone,
         hour: "2-digit",
         minute: "2-digit",
       }).format(new Date());
@@ -55,18 +65,8 @@ export default function HomePage() {
     }
   };
 
-  useEffect(() => {
-    const handleCitySelect = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail && detail.name) {
-        setCurrentCityName(detail.name);
-        setShowTravelText(true);
-      }
-    };
-    window.addEventListener("citySelect", handleCitySelect);
-    return () => window.removeEventListener("citySelect", handleCitySelect);
-  }, []);
-
+  // --- Effects ---
+  // Effect to handle the intro animation
   useEffect(() => {
     if (showIntro && introRef.current) {
       gsap.fromTo(
@@ -96,9 +96,25 @@ export default function HomePage() {
     }
   }, [showIntro]);
 
+  // Effect to trigger the travel text animation when the city changes
+  useEffect(() => {
+    // We only want to trigger this after the intro is done
+    if (started) {
+      setShowTravelText(true);
+    }
+  }, [selectedCity, started]);
+
   return (
     <div className="relative w-full h-screen overflow-hidden">
-      <CityMap />
+      {/* The map now receives the selected city's data directly as props.
+          The zoom level is hardcoded to 14 for a good city-level view. */}
+      <CityMap
+        center={{
+          lat: selectedCity.lat,
+          lng: selectedCity.lng,
+          zoom: 14, // This ensures the map is zoomed in on the city
+        }}
+      />
 
       {showIntro && (
         <div
@@ -115,42 +131,35 @@ export default function HomePage() {
 
       {started && (
         <>
+          {/* onSelectCity now directly updates the state in this component.
+              This is the correct "React way" to handle child-to-parent communication. */}
           <AnimatedHeaderBoard
             cities={cities}
-            onSelectCity={(city) => {
-              window.dispatchEvent(
-                new CustomEvent("citySelect", {
-                  detail: {
-                    name: city.name,
-                    lat: city.lat,
-                    lng: city.lng,
-                    zoom: 14,
-                  },
-                })
-              );
-            }}
+            onSelectCity={setSelectedCity}
           />
 
           <ProgressBar />
 
+          {/* This component is now driven by the selectedCity state */}
           <TravelText
             active={showTravelText}
-            destination={currentCityName}
+            destination={selectedCity.name}
             onComplete={() => setShowTravelText(false)}
           />
 
+          {/* This component is now also driven by the selectedCity state */}
           <div
             className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow"
             style={{
               border: "2px solid white",
-              color: countryColors[currentCityName] || "#00ff00",
+              color: countryColors[selectedCity.name] || "#00ff00",
             }}
           >
             <div className="flex items-center gap-2">
-              <SplitFlap text={currentCityName} />
+              <SplitFlap text={selectedCity.name} />
             </div>
             <span className="text-xs mt-1 text-white">
-              {getCityTime(currentCityName)}
+              {getCityTime(selectedCity.timezone)}
             </span>
           </div>
         </>
