@@ -113,6 +113,7 @@ export default function HomePage() {
           lat: selectedCity.lat,
           lng: selectedCity.lng,
           zoom: 14, // This ensures the map is zoomed in on the city
+          name: selectedCity.name
         }}
       />
 
