@@ -1,16 +1,22 @@
-// src/app/api/travel-tips/route.ts
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { NextRequest, NextResponse } from 'next/server';
-import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
+import { NextRequest, NextResponse } from "next/server";
+import { SecretManagerServiceClient } from "@google-cloud/secret-manager";
 
-// --- Authentication logic remains the same ---
-const GEMINI_SECRET_NAME = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
+// --- Config ---
+const GEMINI_SECRET_NAME = "projects/845341257082/secrets/gemini-api-key/versions/latest";
 let cachedGeminiApiKey: string | null = null;
 let cachedGeminiClient: GoogleGenerativeAI | null = null;
 
+// --- Secret Manager / Dev Key Fallback ---
 async function getGeminiApiKeyFromSecretManager(): Promise<string> {
   if (cachedGeminiApiKey) return cachedGeminiApiKey;
+
+  // DEV MODE fallback
+  if (process.env.NODE_ENV === "development" && process.env.GEMINI_API_KEY) {
+    cachedGeminiApiKey = process.env.GEMINI_API_KEY;
+    return cachedGeminiApiKey;
+  }
+
   const client = new SecretManagerServiceClient();
   const [version] = await client.accessSecretVersion({ name: GEMINI_SECRET_NAME });
   const payload = version.payload?.data?.toString();
@@ -19,6 +25,7 @@ async function getGeminiApiKeyFromSecretManager(): Promise<string> {
   return payload;
 }
 
+// --- Gemini Client Init ---
 async function getGeminiClient(): Promise<GoogleGenerativeAI> {
   if (cachedGeminiClient) return cachedGeminiClient;
   const apiKey = await getGeminiApiKeyFromSecretManager();
@@ -26,25 +33,22 @@ async function getGeminiClient(): Promise<GoogleGenerativeAI> {
   return cachedGeminiClient;
 }
 
-// --- The Main POST Handler for RICH Travel Tips ---
-
+// --- POST Handler ---
 export async function POST(req: NextRequest) {
   console.log("\n--- ✨ New RICH Travel Tips Request Received ---");
 
   try {
     const geminiClient = await getGeminiClient();
     const { destination } = await req.json();
-    console.log(`➡️ [Input] Received destination: ${destination}`);
+    console.log(`➡️ [Input] Destination: ${destination}`);
 
-    if (!destination || typeof destination !== 'string') {
+    if (!destination || typeof destination !== "string") {
       return NextResponse.json(
         { message: 'Invalid input: "destination" string is required.' },
         { status: 400 }
       );
     }
 
-    // --- NEW, "RICHER" PROMPT ---
-    // This prompt asks for a more complex object with multiple facets of the city.
     const prompt = `
 You are a world-class travel journalist and a savvy local guide for "${destination}". Your task is to generate a "rich welcome card" for a first-time visitor.
 
@@ -53,39 +57,55 @@ You are a world-class travel journalist and a savvy local guide for "${destinati
 - Be creative, concise, and insightful.
 
 **Generate the following fields in your JSON response:**
-1.  "intro": A single, captivating welcome sentence that sets the scene.
-2.  "vibeKeywords": An array of 3-4 single-word strings describing the city's atmosphere (e.g., "Historic", "Futuristic", "Romantic").
-3.  "mustDo": A short description of one iconic, can't-miss activity.
-4.  "hiddenGem": A description of a lesser-known spot or experience that offers a unique local perspective.
-5.  "foodieTip": A recommendation for a specific local dish, drink, or type of food market to try.
-
-**JSON Structure Example:**
-{
-  "intro": "Welcome to Tokyo, a dazzling metropolis where ancient traditions collide with futuristic neon wonderlands.",
-  "vibeKeywords": ["Futuristic", "Orderly", "Vibrant", "Respectful"],
-  "mustDo": "Experience the energy of Shibuya Crossing, the world's busiest intersection, especially at night from a nearby cafe.",
-  "hiddenGem": "Explore the quiet, old-world charm of the Yanaka district, a glimpse into Tokyo before the skyscrapers.",
-  "foodieTip": "Don't leave without trying authentic, fresh sushi for breakfast at the Toyosu Fish Market."
-}
+1. "intro": A single, captivating welcome sentence that sets the scene.
+2. "vibeKeywords": An array of 3-4 single-word strings describing the city's atmosphere.
+3. "mustDo": A short description of one iconic, can't-miss activity.
+4. "hiddenGem": A description of a lesser-known spot or experience that offers a unique local perspective.
+5. "foodieTip": A recommendation for a specific local dish, drink, or food market to try.
 `;
 
-    console.log("🟡 [Gemini] Sending prompt for rich travel tips...");
     const model = geminiClient.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-    console.log("✅ [Gemini] Successfully received rich response.");
 
-    // Parse the JSON response from Gemini
-    const richData = JSON.parse(text);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
 
-    // --- UPDATED: Return the rich data object directly ---
+    let result;
+    try {
+      result = await model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7 },
+      });
+    } catch (timeoutError) {
+      console.error("⏰ Timeout or Gemini error:", timeoutError);
+      return NextResponse.json({ message: "Gemini model timed out or failed." }, { status: 504 });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const raw = result.response.text().trim();
+
+    // Strip markdown-style code fences if present
+    let cleaned = raw;
+    if (cleaned.startsWith("```json")) {
+      cleaned = cleaned.replace(/^```json/, "").replace(/```$/, "").trim();
+    }
+
+    let richData;
+    try {
+      richData = JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.error("❌ Failed to parse Gemini response as JSON:", parseErr);
+      console.warn("🧾 Raw Gemini output:", cleaned);
+      return NextResponse.json({ message: "Gemini returned malformed JSON." }, { status: 500 });
+    }
+
+    console.log("✅ Successfully parsed rich data:", richData);
     return NextResponse.json(richData, { status: 200 });
 
   } catch (error) {
-    console.error("❌ [Error] Rich Travel Tips POST handler failed:", error);
+    console.error("❌ Unexpected server error:", error);
     return NextResponse.json(
-      { message: error instanceof Error ? error.message : 'An unknown server error occurred.' },
+      { message: error instanceof Error ? error.message : "Unknown server error." },
       { status: 500 }
     );
   }
