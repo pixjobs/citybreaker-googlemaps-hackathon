@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import gsap from "gsap";
-import { FaMapMarkedAlt, FaTimes } from "react-icons/fa";
 
 // Local Component Imports
 import ItineraryPanel from "./ItineraryPanel";
@@ -18,11 +17,13 @@ interface BasicPlaceInfo {
 interface CityMapProps {
   center: { lat: number; lng: number; zoom: number; name: string; };
   tripLength?: number;
-  // --- NEW: A callback prop to send photo URLs to the parent component ---
   onPlacesLoaded?: (photoUrls: string[]) => void;
+  selectedPlaceId?: string | null;
+  isItineraryOpen: boolean;
+  onCloseItinerary: () => void;
 }
 interface PlacePhotoInfo {
-  name:string;
+  name: string;
   photoUrl?: string;
 }
 function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement>, isOpen: boolean) {
@@ -46,7 +47,14 @@ function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement>, isOpen: boo
 
 // --- Main CityMap Component ---
 
-export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: CityMapProps) {
+export default function CityMap({
+  center,
+  tripLength = 3,
+  onPlacesLoaded,
+  selectedPlaceId,
+  isItineraryOpen,
+  onCloseItinerary,
+}: CityMapProps) {
   const { isLoaded } = useMaps();
   const mapRef = useRef<google.maps.Map | null>(null);
   const panelContainerRef = useRef<HTMLDivElement>(null);
@@ -54,7 +62,6 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
   
   const [itinerary, setItinerary] = useState<string | null>(null);
   const [placePhotos, setPlacePhotos] = useState<PlacePhotoInfo[]>([]);
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
   
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [isDetailsLoading, setIsDetailsLoading] = useState(false);
@@ -67,7 +74,7 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
   const [isLoading, setIsLoading] = useState(false);
   const cityKey = `${center.lat}-${center.lng}-${tripLength}`;
 
-  useAnimatedPanel(panelContainerRef, isPanelOpen);
+  useAnimatedPanel(panelContainerRef, isItineraryOpen);
 
   useEffect(() => {
     if (mapRef.current) {
@@ -76,7 +83,7 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
     }
   }, [center]);
 
-  const fetchAndShowPlaceDetails = (placeId: string) => {
+  const fetchAndShowPlaceDetails = useCallback((placeId: string) => {
     if (!mapRef.current) return;
 
     setIsDetailsLoading(true);
@@ -87,15 +94,19 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
     setYoutubeVideos([]);
     setActiveTab("info");
 
-    const placesService = new window.google.maps.places.PlacesService(mapRef.current!);
+    const placesService = new window.google.maps.places.PlacesService(mapRef.current);
     
     placesService.getDetails(
       {
         placeId: placeId,
-        fields: ["name", "vicinity", "photos", "website", "rating", "reviews", "editorial_summary"],
+        fields: ["name", "vicinity", "photos", "website", "rating", "reviews", "editorial_summary", "geometry"],
       },
       async (placeDetails, status) => {
         if (status === window.google.maps.places.PlacesServiceStatus.OK && placeDetails) {
+          if (placeDetails.geometry?.location) {
+            mapRef.current?.panTo(placeDetails.geometry.location);
+          }
+          
           setSelectedPlaceBasic({
             name: placeDetails.name || "Unnamed Place",
             address: placeDetails.vicinity || "Address not available",
@@ -124,7 +135,6 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
           } finally {
             setIsVideosLoading(false);
           }
-
         } else {
           console.error("Place Details request failed with status:", status);
           setIsPopupOpen(false);
@@ -133,7 +143,13 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
         }
       }
     );
-  };
+  }, [mapRef]);
+
+  useEffect(() => {
+    if (selectedPlaceId) {
+      fetchAndShowPlaceDetails(selectedPlaceId);
+    }
+  }, [selectedPlaceId, fetchAndShowPlaceDetails]);
 
   useEffect(() => {
     if (!isLoaded || !window.google || !window.google.maps || !window.google.maps.Map) {
@@ -198,12 +214,10 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
           
           setPlacePhotos(photoInfoForItinerary);
 
-          // --- NEW: Gather and send photo URLs for the slideshow ---
           const photoUrlsForSlideshow = results
             .map(place => place.photos?.[0]?.getUrl({ maxWidth: 1920, maxHeight: 1080 }))
-            .filter((url): url is string => !!url); // Filter out any undefined URLs
+            .filter((url): url is string => !!url);
 
-          // Call the callback prop to send the data to the parent component
           if (onPlacesLoaded) {
             onPlacesLoaded(photoUrlsForSlideshow);
           }
@@ -242,7 +256,7 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
     };
 
     initAndFetch();
-  }, [isLoaded, cityKey, center, onPlacesLoaded]); // Added onPlacesLoaded to dependency array
+  }, [isLoaded, cityKey, center, onPlacesLoaded, fetchAndShowPlaceDetails]);
 
   return (
     <>
@@ -260,14 +274,6 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
         setActiveTab={setActiveTab}
       />
 
-      <button
-        onClick={() => setIsPanelOpen(!isPanelOpen)}
-        className="fixed bottom-6 right-6 md:bottom-10 md:right-10 z-30 bg-yellow-500 text-black p-4 rounded-full shadow-lg hover:bg-yellow-400 active:scale-95 transition-all"
-        aria-label={isPanelOpen ? "Hide Itinerary" : "Show Itinerary"}
-      >
-        {isPanelOpen ? <FaTimes size={24} /> : <FaMapMarkedAlt size={24} />}
-      </button>
-
       <div
         ref={panelContainerRef}
         className="fixed inset-0 z-20 opacity-0 pointer-events-none"
@@ -279,7 +285,7 @@ export default function CityMap({ center, tripLength = 3, onPlacesLoaded }: City
             itineraryMarkdown={itinerary}
             isLoading={isLoading}
             placePhotos={placePhotos}
-            onClose={() => setIsPanelOpen(false)}
+            onClose={onCloseItinerary}
           />
         )}
       </div>

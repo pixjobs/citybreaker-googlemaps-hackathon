@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import SplitFlapBoard from "@/components/SplitFlapBoard";
 import CityBreakerLogo from "@/components/CityBreakerLogo";
+import SearchBox from "./SearchBox"; // Import the new SearchBox
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Globe,
@@ -25,17 +26,22 @@ interface City {
 const menuItems = [
   { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me" },
   { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary" },
-  { label: "Satellite", icon: <Globe size={18} />, action: "toggle-satellite" },
+  { label: "Toggle Satellite", icon: <Globe size={18} />, action: "toggle-satellite" },
   { label: "Landmarks", icon: <Landmark size={18} />, action: "toggle-landmarks" },
   { label: "Restaurants", icon: <Utensils size={18} />, action: "toggle-restaurants" },
 ];
 
+// --- UPDATED PROPS ---
 export default function AnimatedHeaderBoard({
   cities,
   onSelectCity,
+  onMenuAction,
+  onPlaceSelect,
 }: {
   cities: City[];
   onSelectCity: (city: City) => void;
+  onMenuAction: (action: string) => void;
+  onPlaceSelect: (placeId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -59,14 +65,8 @@ export default function AnimatedHeaderBoard({
         setMenuOpen(false);
       }
     };
-
-    if (menuOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [menuOpen]);
 
   const toggleBoard = () => {
@@ -97,88 +97,76 @@ export default function AnimatedHeaderBoard({
   };
 
   const handleItemClick = (action: string) => {
-    switch (action) {
-      case "toggle-satellite":
-        window.dispatchEvent(new Event("toggle-satellite"));
-        break;
-      case "toggle-landmarks":
-        window.dispatchEvent(new Event("show-landmarks-menu"));
-        break;
-      case "toggle-restaurants":
-        window.dispatchEvent(new Event("show-restaurants-menu"));
-        break;
-      case "surprise-me":
-        console.log("🎯 surprise-me triggered (Gemini to hook here)");
-        break;
-      case "itinerary":
-        console.log("📍 itinerary triggered (hook up later)");
-        break;
-    }
+    onMenuAction(action); // Use the callback prop
     setMenuOpen(false);
   };
 
   return (
-    <header
-      ref={containerRef}
-      className="fixed top-0 left-0 w-full z-50 bg-black/80 backdrop-blur border-b border-yellow-500 text-yellow-300"
-    >
-      <div className="flex items-center justify-between px-4 py-2">
-        <div className="flex items-center gap-3">
-          <CityBreakerLogo />
-        </div>
+    <>
+      <header
+        ref={containerRef}
+        className="fixed top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-3xl z-50 bg-black/60 backdrop-blur-lg border border-yellow-500/50 text-yellow-300 rounded-xl shadow-lg"
+      >
+        <div className="flex items-center justify-between px-4 py-2">
+          <div className="hidden sm:flex items-center gap-3">
+            <CityBreakerLogo />
+          </div>
 
-        <div className="flex items-center gap-4">
-          <button
-            onClick={toggleBoard}
-            className="text-xs sm:text-sm border border-yellow-400 px-3 py-1 rounded hover:bg-yellow-600/20 transition-colors"
-          >
-            {expanded ? "Hide Cities ▲" : "Show Cities ▼"}
-          </button>
+          <SearchBox onPlaceSelect={onPlaceSelect} />
 
-          <div ref={menuRef} className="relative">
+          <div className="flex items-center gap-2 sm:gap-4">
             <button
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="border border-yellow-400 p-1 rounded hover:bg-yellow-600/20 transition-colors"
+              onClick={toggleBoard}
+              className="text-xs sm:text-sm border border-yellow-400 px-3 py-1 rounded-lg hover:bg-yellow-600/20 transition-colors whitespace-nowrap"
             >
-              {menuOpen ? <X size={18} /> : <Menu size={18} />}
+              {expanded ? "Hide ▲" : "Cities ▼"}
             </button>
 
-            <AnimatePresence>
-              {menuOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.2 }}
-                  className="absolute right-0 mt-2 bg-black border border-yellow-400 text-yellow-200 rounded shadow-lg z-50 min-w-[180px] overflow-hidden"
-                >
-                  {menuItems.map((item) => (
-                    <button
-                      key={item.label}
-                      onClick={() => handleItemClick(item.action)}
-                      className="w-full flex items-center gap-2 px-4 py-2 hover:bg-yellow-600/20 text-left transition-colors"
-                    >
-                      {item.icon}
-                      <span className="text-sm">{item.label}</span>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <div ref={menuRef} className="relative">
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="border border-yellow-400 p-1.5 rounded-lg hover:bg-yellow-600/20 transition-colors"
+              >
+                {menuOpen ? <X size={18} /> : <Menu size={18} />}
+              </button>
+
+              <AnimatePresence>
+                {menuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute right-0 mt-2 bg-black/90 backdrop-blur-lg border border-yellow-400 text-yellow-200 rounded-lg shadow-lg z-50 min-w-[200px] overflow-hidden"
+                  >
+                    {menuItems.map((item) => (
+                      <button
+                        key={item.label}
+                        onClick={() => handleItemClick(item.action)}
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-yellow-600/20 text-left transition-colors"
+                      >
+                        {item.icon}
+                        <span className="text-sm">{item.label}</span>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
-      </div>
+      </header>
 
       <div
         ref={boardRef}
         style={{ height: 0, overflow: "hidden", display: "none", opacity: 0 }}
-        className="px-4 pb-3"
+        className="fixed top-[76px] left-1/2 -translate-x-1/2 w-11/12 max-w-3xl z-40 bg-black/60 backdrop-blur-lg border border-yellow-500/50 border-t-0 text-yellow-300 rounded-b-xl shadow-lg px-4 pb-3"
       >
         <SplitFlapBoard
           cities={cities}
           onSelectCity={handleCitySelectAndClose}
         />
       </div>
-    </header>
+    </>
   );
 }
