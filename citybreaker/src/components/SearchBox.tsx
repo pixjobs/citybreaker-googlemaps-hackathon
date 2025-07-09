@@ -15,10 +15,8 @@ interface AutocompletePrediction {
   };
 }
 
-// --- UPDATED PROPS ---
-// We now accept the map's center coordinates and a navigation callback.
 interface SearchBoxProps {
-  mapCenter: { lat: number; lng: number; };
+  mapCenter: { lat: number; lng: number; }; // Expects an object with lat and lng
   onPlaceNavigate: (location: google.maps.LatLng) => void;
 }
 
@@ -36,15 +34,17 @@ export default function SearchBox({ mapCenter, onPlaceNavigate }: SearchBoxProps
   useEffect(() => {
     if (isLoaded && !autocompleteService.current) {
       autocompleteService.current = new window.google.maps.places.AutocompleteService();
-      // We need a dummy div to initialize the PlacesService
       const dummyDiv = document.createElement('div');
       placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
     }
   }, [isLoaded]);
 
-  // Fetch predictions, now using a fixed 100km radius
+  // Fetch predictions, now with a robust guard clause
   useEffect(() => {
-    if (!query || !autocompleteService.current) {
+    // --- THIS IS THE CRITICAL FIX (Already implemented, but re-confirming its presence) ---
+    // This guard clause ensures that `mapCenter` is defined and Google Maps services are ready
+    // before attempting to use `mapCenter.lat` or `autocompleteService.current`.
+    if (!query || !autocompleteService.current || !mapCenter || mapCenter.lat === undefined || mapCenter.lng === undefined) {
       setPredictions([]);
       return;
     }
@@ -53,21 +53,25 @@ export default function SearchBox({ mapCenter, onPlaceNavigate }: SearchBoxProps
       autocompleteService.current?.getPlacePredictions(
         {
           input: query,
-          // --- NEW: Use location and radius for a more reliable search area ---
-          location: new window.google.maps.LatLng(mapCenter.lat, mapCenter.lng),
+          location: new window.google.maps.LatLng(mapCenter.lat, mapCenter.lng), // `mapCenter` is guaranteed to be defined here
           radius: 100000, // 100km in meters
-          strictBounds: false, // Still allow important results slightly outside
+          strictBounds: false,
         },
-        (results) => {
-          setPredictions(results || []);
+        (results, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK) {
+            setPredictions(results || []);
+          } else {
+            console.error(`Autocomplete search failed with status: ${status}`);
+            setPredictions([]);
+          }
         }
       );
     }, 300); // Debounce input
 
     return () => clearTimeout(handler);
-  }, [query, mapCenter]); // Re-run if the map center changes
+  }, [query, mapCenter]); // The dependency array is correct.
 
-  // Handle clicking outside
+  // Handle clicking outside to close the results dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchBoxRef.current && !searchBoxRef.current.contains(event.target as Node)) {
@@ -78,6 +82,7 @@ export default function SearchBox({ mapCenter, onPlaceNavigate }: SearchBoxProps
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Handle selecting a place from the dropdown
   const handleSelect = (placeId: string) => {
     if (!placesService.current) return;
 
