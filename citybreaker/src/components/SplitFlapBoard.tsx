@@ -7,8 +7,7 @@ interface City {
   name: string;
   timezone: string;
   time?: string;
-  flight?: string;
-  gate?: string;
+  salesPitch?: string;
   remark?: string;
 }
 
@@ -21,6 +20,7 @@ export default function SplitFlapBoard({
 }) {
   const boardRef = useRef<HTMLDivElement>(null);
   const [cityTimes, setCityTimes] = useState<Record<string, string>>({});
+  const [enrichedCities, setEnrichedCities] = useState<City[]>(cities);
 
   useEffect(() => {
     const updateTimes = () => {
@@ -44,6 +44,29 @@ export default function SplitFlapBoard({
   }, [cities]);
 
   useEffect(() => {
+    const enrichWithPitches = async () => {
+      const results = await Promise.all(
+        cities.map(async (city) => {
+          try {
+            const res = await fetch("/api/city-pitch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ city: city.name }),
+            });
+            if (!res.ok) throw new Error("Request failed");
+            const data = await res.json();
+            return { ...city, salesPitch: data.pitch };
+          } catch {
+            return city;
+          }
+        })
+      );
+      setEnrichedCities(results);
+    };
+    enrichWithPitches();
+  }, [cities]);
+
+  useEffect(() => {
     if (boardRef.current) {
       const allLetters = boardRef.current.querySelectorAll(".letter");
       gsap.fromTo(
@@ -61,25 +84,23 @@ export default function SplitFlapBoard({
         }
       );
     }
-  }, [cities]);
+  }, [enrichedCities]);
 
   return (
     <div
       ref={boardRef}
       className="w-full bg-black border-2 border-yellow-500 rounded-md font-mono text-sm text-white overflow-auto"
     >
-      <div className="grid grid-cols-5 text-yellow-400 px-4 py-2 border-b border-yellow-500 uppercase font-bold tracking-wide text-xs sm:text-sm">
+      <div className="grid grid-cols-3 text-yellow-400 px-4 py-2 border-b border-yellow-500 uppercase font-bold tracking-wide text-xs sm:text-sm">
         <div>Time</div>
         <div>Destination</div>
-        <div>Flight</div>
-        <div>Gate</div>
-        <div>Remark</div>
+        <div>Pitch</div>
       </div>
 
-      {cities.map((city, idx) => (
+      {enrichedCities.map((city, idx) => (
         <div
           key={`city-${idx}`}
-          className="grid grid-cols-5 px-4 py-2 hover:bg-yellow-500/10 cursor-pointer text-white border-b border-yellow-700 transition-all"
+          className="grid grid-cols-3 px-4 py-2 hover:bg-yellow-500/10 cursor-pointer text-white border-b border-yellow-700 transition-all"
           onClick={() => onSelectCity(city)}
         >
           <div className="letter text-yellow-200">
@@ -88,18 +109,8 @@ export default function SplitFlapBoard({
           <div className="letter text-yellow-300 font-bold tracking-widest">
             {city.name.toUpperCase()}
           </div>
-          <div className="letter">{city.flight || "—"}</div>
-          <div className="letter">{city.gate || "—"}</div>
-          <div
-            className={`letter ${
-              city.remark === "DELAYED"
-                ? "text-red-400"
-                : city.remark === "BOARDING"
-                ? "text-green-400"
-                : "text-white"
-            }`}
-          >
-            {city.remark || "ON TIME"}
+          <div className="letter text-yellow-100 italic">
+            {city.salesPitch || "—"}
           </div>
         </div>
       ))}

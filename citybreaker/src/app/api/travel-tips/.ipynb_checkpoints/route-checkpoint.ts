@@ -64,7 +64,7 @@ You are a world-class travel journalist and a savvy local guide for "${destinati
 5. "foodieTip": A recommendation for a specific local dish, drink, or food market to try.
 `;
 
-    const model = geminiClient.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+    const model = geminiClient.getGenerativeModel({ model: "gemini-2.5-flash-lite-preview-06-17" });
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 sec timeout
