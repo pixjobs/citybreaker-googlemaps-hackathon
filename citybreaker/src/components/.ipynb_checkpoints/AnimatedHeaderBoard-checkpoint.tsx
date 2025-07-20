@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import SplitFlapBoard from "@/components/SplitFlapBoard";
 import CityBreakerLogo from "@/components/CityBreakerLogo";
-import SearchBox from "./SearchBox"; // Import the new SearchBox
+import SearchBox from "./SearchBox";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Globe,
@@ -31,7 +31,6 @@ const menuItems = [
   { label: "Restaurants", icon: <Utensils size={18} />, action: "toggle-restaurants" },
 ];
 
-// --- UPDATED PROPS ---
 export default function AnimatedHeaderBoard({
   cities,
   onSelectCity,
@@ -48,7 +47,15 @@ export default function AnimatedHeaderBoard({
   const menuRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [boardTop, setBoardTop] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
+  // Mark client-side mount
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Entrance animation
   useEffect(() => {
     if (containerRef.current) {
       gsap.fromTo(
@@ -59,45 +66,56 @@ export default function AnimatedHeaderBoard({
     }
   }, []);
 
+  // Compute board position after mount/resizes
+  useLayoutEffect(() => {
+    function updateTop() {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const gap = window.innerWidth < 640 ? 24 : 12; // larger gap on mobile
+        setBoardTop(rect.bottom + gap);
+      }
+    }
+    updateTop();
+    window.addEventListener("resize", updateTop);
+    return () => window.removeEventListener("resize", updateTop);
+  }, []);
+
+  // Close menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+    const onClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
     };
-    if (menuOpen) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    if (menuOpen) document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
   }, [menuOpen]);
 
+  // Toggle flap board
   const toggleBoard = () => {
-    const isCurrentlyExpanded = !expanded;
-    setExpanded(isCurrentlyExpanded);
-
+    const isOpen = !expanded;
+    setExpanded(isOpen);
     if (boardRef.current) {
       gsap.to(boardRef.current, {
-        height: isCurrentlyExpanded ? "auto" : 0,
-        opacity: isCurrentlyExpanded ? 1 : 0,
+        height: isOpen ? "auto" : 0,
+        opacity: isOpen ? 1 : 0,
         duration: 0.5,
         ease: "power2.out",
-        onStart: () => {
-          if (isCurrentlyExpanded) boardRef.current!.style.display = "block";
-        },
-        onComplete: () => {
-          if (!isCurrentlyExpanded) boardRef.current!.style.display = "none";
-        },
+        onStart: () => { if (isOpen) boardRef.current!.style.display = "block"; },
+        onComplete: () => { if (!isOpen) boardRef.current!.style.display = "none"; },
       });
     }
   };
 
+  // City selection from flap board
   const handleCitySelectAndClose = (city: City) => {
     onSelectCity(city);
-    if (expanded) {
-      toggleBoard();
-    }
+    if (expanded) toggleBoard();
   };
 
+  // Menu item click
   const handleItemClick = (action: string) => {
-    onMenuAction(action); // Use the callback prop
+    onMenuAction(action);
     setMenuOpen(false);
   };
 
@@ -111,9 +129,7 @@ export default function AnimatedHeaderBoard({
           <div className="hidden sm:flex items-center gap-3">
             <CityBreakerLogo />
           </div>
-
           <SearchBox onPlaceSelect={onPlaceSelect} />
-
           <div className="flex items-center gap-2 sm:gap-4">
             <button
               onClick={toggleBoard}
@@ -121,7 +137,6 @@ export default function AnimatedHeaderBoard({
             >
               {expanded ? "Hide ▲" : "Cities ▼"}
             </button>
-
             <div ref={menuRef} className="relative">
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
@@ -129,7 +144,6 @@ export default function AnimatedHeaderBoard({
               >
                 {menuOpen ? <X size={18} /> : <Menu size={18} />}
               </button>
-
               <AnimatePresence>
                 {menuOpen && (
                   <motion.div
@@ -139,7 +153,7 @@ export default function AnimatedHeaderBoard({
                     transition={{ duration: 0.2 }}
                     className="absolute right-0 mt-2 bg-black/90 backdrop-blur-lg border border-yellow-400 text-yellow-200 rounded-lg shadow-lg z-50 min-w-[200px] overflow-hidden"
                   >
-                    {menuItems.map((item) => (
+                    {menuItems.map(item => (
                       <button
                         key={item.label}
                         onClick={() => handleItemClick(item.action)}
@@ -157,16 +171,18 @@ export default function AnimatedHeaderBoard({
         </div>
       </header>
 
-      <div
-        ref={boardRef}
-        style={{ height: 0, overflow: "hidden", display: "none", opacity: 0 }}
-        className="fixed top-[76px] left-1/2 -translate-x-1/2 w-11/12 max-w-3xl z-40 bg-black/60 backdrop-blur-lg border border-yellow-500/50 border-t-0 text-yellow-300 rounded-b-xl shadow-lg px-4 pb-3"
-      >
-        <SplitFlapBoard
-          cities={cities}
-          onSelectCity={handleCitySelectAndClose}
-        />
-      </div>
+      {mounted && (
+        <div
+          ref={boardRef}
+          className="fixed left-1/2 -translate-x-1/2 w-11/12 max-w-3xl z-40 bg-black/60 backdrop-blur-lg border border-yellow-500/50 border-t-0 rounded-b-xl shadow-lg overflow-hidden"
+          style={{ top: boardTop, height: 0, opacity: 0, display: 'none' }}
+        >
+          <SplitFlapBoard
+            cities={cities}
+            onSelectCity={handleCitySelectAndClose}
+          />
+        </div>
+      )}
     </>
   );
 }

@@ -59,9 +59,9 @@ You are a world-class travel journalist and a savvy local guide for "${destinati
 **Generate the following fields in your JSON response:**
 1. "intro": A single, captivating welcome sentence that sets the scene.
 2. "vibeKeywords": An array of 3-4 single-word strings describing the city's atmosphere.
-3. "mustDo": A short description of one iconic, can't-miss activity.
+3. "mustDo": A short description of one iconic, can't-miss activity. 
 4. "hiddenGem": A description of a lesser-known spot or experience that offers a unique local perspective.
-5. "foodieTip": A recommendation for a specific local dish, drink, or food market to try.
+5. "foodieTip": A recommendation for a worthy meal, drink or food market to try - keep to the local traditions but take the week day and month of the year into consideration.
 `;
 
     const model = geminiClient.getGenerativeModel({ model: "gemini-2.5-flash-lite-preview-06-17" });
