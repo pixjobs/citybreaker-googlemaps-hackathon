@@ -1,21 +1,32 @@
-// src/app/api/youtube-search/route.ts
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
+import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 
-const youtube = google.youtube({
-  version: 'v3',
-  // --- THIS IS THE ONLY CHANGE ---
-  // We now use the same key as your Google Maps setup.
-  auth: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
-});
+const secretClient = new SecretManagerServiceClient();
+
+async function getYoutubeApiKey(): Promise<string> {
+  const [version] = await secretClient.accessSecretVersion({
+    name: 'projects/934477100130/secrets/YOUTUBE_API_KEY/versions/latest',
+  });
+
+  const payload = version.payload?.data?.toString();
+  if (!payload) throw new Error('Secret has no payload');
+  return payload;
+}
 
 export async function POST(request: Request) {
   try {
     const { query } = await request.json();
-
     if (!query) {
       return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
     }
+
+    const apiKey = await getYoutubeApiKey();
+
+    const youtube = google.youtube({
+      version: 'v3',
+      auth: apiKey,
+    });
 
     const response = await youtube.search.list({
       part: ['snippet'],
@@ -33,11 +44,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ videos });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('YouTube API Error:', error);
-    // This will help you debug if the key has issues with the YouTube API
     if (error.code === 403) {
-        return NextResponse.json({ error: 'YouTube API request forbidden. Check if the API is enabled for your key.' }, { status: 403 });
+      return NextResponse.json({
+        error: 'YouTube API request forbidden. Check API key access or quota.',
+      }, { status: 403 });
     }
     return NextResponse.json({ error: 'Failed to fetch YouTube videos' }, { status: 500 });
   }
