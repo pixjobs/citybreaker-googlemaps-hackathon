@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google-cloud/secret-manager": "^6.1.0",
+    "@google-cloud/storage": "^7.16.0",
     "@google/generative-ai": "^0.24.1",
     "@googlemaps/js-api-loader": "^1.16.10",
     "@react-google-maps/api": "^2.20.7",
@@ -26,6 +27,7 @@
     "next": "15.3.4",
     "node-fetch": "^3.3.2",
     "pdfkit": "^0.17.1",
+    "puppeteer": "^24.14.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
