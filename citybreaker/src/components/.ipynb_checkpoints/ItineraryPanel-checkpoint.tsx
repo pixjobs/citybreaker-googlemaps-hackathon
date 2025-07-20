@@ -21,7 +21,7 @@ interface ItineraryPanelProps {
   placePhotos: PlacePhotoInfo[];
   onClose: () => void;
   tripLength: number;
-  onTripLengthChange: (days: number) => void;
+  onTripLengthChange?: (days: number) => void; // made optional
 }
 
 const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
@@ -39,6 +39,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
   const [currentTripLength, setCurrentTripLength] = useState(tripLength > 0 ? tripLength : 3);
   const panelRef = useRef<HTMLDivElement>(null);
   const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const carouselRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const fetchItinerary = useCallback(async () => {
     setPanelLoading(true);
@@ -51,11 +52,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
         const res = await fetch('/api/gemini-recommendations/json', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            places: placePhotos,
-            tripLength: currentTripLength,
-            cityName,
-          }),
+          body: JSON.stringify({ places: placePhotos, tripLength: currentTripLength, cityName }),
         });
 
         if (!res.ok) {
@@ -93,11 +90,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
       const res = await fetch('/api/pdf-itinerary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          places: placePhotos,
-          tripLength: currentTripLength,
-          cityName,
-        }),
+        body: JSON.stringify({ places: placePhotos, tripLength: currentTripLength, cityName }),
       });
 
       if (!res.ok) {
@@ -120,7 +113,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
 
   const handleDaysChange = (days: number) => {
     setCurrentTripLength(days);
-    onTripLengthChange(days);
+    onTripLengthChange?.(days); // safe call
   };
 
   useEffect(() => {
@@ -145,18 +138,36 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
 
   useEffect(() => {
     contentRefs.current = contentRefs.current.slice(0, itineraryData.length);
+    carouselRefs.current = carouselRefs.current.slice(0, itineraryData.length);
   }, [itineraryData]);
+
+  useEffect(() => {
+    itineraryData.forEach((day, i) => {
+      const container = carouselRefs.current[i];
+      if (!container) return;
+      const matches = displayPlaces.filter(p =>
+        day.activities.some(a => a.toLowerCase().includes(p.name.toLowerCase()))
+      );
+      const photos = matches.map(m => m.photoUrl).filter(Boolean);
+
+      if (photos.length > 1) {
+        const slides = container.querySelectorAll('img');
+        gsap.set(slides, { opacity: 0 });
+        const tl = gsap.timeline({ repeat: -1 });
+        slides.forEach((slide, idx) => {
+          tl.to(slide, { opacity: 1, duration: 1 });
+          tl.to(slide, { opacity: 0, duration: 1 }, "+=2");
+        });
+      }
+    });
+  }, [displayPlaces, itineraryData]);
 
   const isLoading = panelLoading || pdfLoading;
   const hasData = itineraryData.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4">
-      <div
-        ref={panelRef}
-        className="w-full max-w-3xl h-[85vh] bg-[#0f0f0f] text-[#f5f5f5] font-sans rounded-2xl overflow-y-auto shadow-2xl relative"
-      >
-        {/* Header */}
+      <div ref={panelRef} className="w-full max-w-3xl h-[85vh] bg-[#0f0f0f] text-[#f5f5f5] font-sans rounded-2xl overflow-y-auto shadow-2xl relative">
         <div className="sticky top-0 bg-[#1a1a1a] p-4 flex justify-between items-center border-b border-gray-800 z-10">
           <h2 className="text-xl font-bold tracking-wide text-[#FFD600]">{cityName} Itinerary</h2>
           <div className="flex items-center gap-2">
@@ -192,7 +203,6 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
           </div>
         </div>
 
-        {/* Tabs */}
         {hasData && (
           <div className="sticky top-[64px] bg-[#1a1a1a] border-b border-gray-800 flex">
             {itineraryData.map((_, i) => (
@@ -211,7 +221,6 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
           </div>
         )}
 
-        {/* Body */}
         <div className="p-6 space-y-10">
           {panelLoading ? (
             <div className="flex justify-center py-20">
@@ -220,25 +229,37 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
           ) : !hasData ? (
             <p className="text-center text-gray-400 py-20">No itinerary data available.</p>
           ) : (
-            itineraryData.map((day, i) => (
-              <div key={i} ref={el => (contentRefs.current[i] = el)} className="space-y-3">
-                <h3 className="text-lg font-bold text-[#FFD600]">{day.title}</h3>
-                {day.dayPhoto && (
-                  <div className="w-full h-48 overflow-hidden rounded-lg shadow border border-[#FFD600]">
-                    <img
-                      src={day.dayPhoto}
-                      alt={`Photo for ${day.title}`}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                )}
-                <ul className="list-disc list-inside text-sm text-gray-300 space-y-1">
-                  {day.activities.map((a, j) => (
-                    <li key={j}>{a}</li>
-                  ))}
-                </ul>
-              </div>
-            ))
+            itineraryData.map((day, i) => {
+              const matched = displayPlaces.filter(p =>
+                day.activities.some(a => a.toLowerCase().includes(p.name.toLowerCase()))
+              );
+              const photos = matched.map(m => m.photoUrl).filter(Boolean);
+              return (
+                <div key={i} ref={el => (contentRefs.current[i] = el)} className="space-y-3">
+                  <h3 className="text-lg font-bold text-[#FFD600]">{day.title}</h3>
+                  {photos.length > 0 && (
+                    <div
+                      className="relative w-full h-48 overflow-hidden rounded-lg shadow border border-[#FFD600]"
+                      ref={el => (carouselRefs.current[i] = el)}
+                    >
+                      {photos.map((url, j) => (
+                        <img
+                          key={j}
+                          src={url}
+                          alt={`Slide ${j + 1}`}
+                          className="absolute top-0 left-0 w-full h-full object-cover opacity-0"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <ul className="list-disc list-inside text-sm text-gray-300 space-y-1">
+                    {day.activities.map((a, j) => (
+                      <li key={j}>{a}</li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
