@@ -194,7 +194,7 @@ export default function CityMap({
           });
 
           try {
-            const res = await fetch("/api/gemini-recommendations", {
+            const res = await fetch("/api/gemini-recommendations/json", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ places: photos, tripLength }),

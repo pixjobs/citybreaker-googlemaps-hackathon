@@ -1,29 +1,27 @@
-// Ensure the runtime is set correctly for your Next.js environment
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 
-// --- Constants ---
 const GEMINI_SECRET_NAME = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
 const MAPS_SECRET_NAME = 'projects/845341257082/secrets/maps-api-key/versions/latest';
-const MAPS_API_BASE_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
+const MAPS_TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
+const MAPS_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 const MAPS_PHOTO_BASE_URL = 'https://maps.googleapis.com/maps/api/place/photo';
 const GEMINI_MODEL = 'gemini-2.5-flash-lite-preview-06-17';
 const MAX_TRIP_DAYS = 7;
 const MIN_TRIP_DAYS = 3;
 
-// --- Types ---
 interface Place {
   name: string;
-  photoUrl?: string; // For enriched places
+  photoUrl?: string;
 }
 
 interface ItineraryDay {
   title: string;
   activities: string[];
-  dayPhoto?: string; // URL of the photo for the day
+  dayPhoto?: string;
 }
 
 // --- Secret Management ---
@@ -33,7 +31,6 @@ let cachedGeminiClient: GoogleGenerativeAI | null = null;
 let secretManagerClient: SecretManagerServiceClient | null = null;
 
 async function getSecretManagerClient(): Promise<SecretManagerServiceClient> {
-  // Lazy initialize Secret Manager client
   if (!secretManagerClient) {
     secretManagerClient = new SecretManagerServiceClient();
   }
@@ -56,132 +53,109 @@ async function getSecret(secretName: string): Promise<string | null> {
   }
 }
 
-// --- Data Enrichment (Places with Photos) ---
+// --- Enrichment ---
 async function enrichPlacesWithPhotos(places: any[], apiKey: string | null): Promise<Place[]> {
   if (!apiKey) {
-    console.warn('Maps API key is missing. Cannot enrich places with photos.');
-    // Return original places, ensuring they conform to the Place interface
-    return places.map((p: any) => ({ name: p?.name || 'Unknown Place', photoUrl: undefined }));
+    console.warn('Maps API key is missing. Returning places without photos.');
+    return places.map((p: any) => ({ name: p?.name || 'Unknown Place' }));
   }
 
   const enrichedPromises = places.map(async (place) => {
-    // Basic validation for place object
-    if (!place || typeof place.name !== 'string' || place.name.trim() === '') {
-      console.warn('Skipping invalid place object during photo enrichment:', place);
-      return { name: 'Invalid Place', photoUrl: undefined };
-    }
-
-    const query = encodeURIComponent(place.name);
-    let photoUrl: string | undefined = undefined;
+    const name = place?.name?.trim();
+    if (!name) return { name: 'Unnamed Place' };
 
     try {
-      const mapsApiUrl = `${MAPS_API_BASE_URL}?query=${query}&key=${apiKey}`;
-      const res = await fetch(mapsApiUrl);
+      const searchUrl = `${MAPS_TEXT_SEARCH_URL}?query=${encodeURIComponent(name)}&key=${apiKey}`;
+      const searchRes = await fetch(searchUrl);
+      if (!searchRes.ok) throw new Error(`TextSearch API error: ${searchRes.status}`);
+      const searchJson = await searchRes.json();
 
-      if (!res.ok) {
-        throw new Error(`Maps API request failed: ${res.status} ${res.statusText}`);
+      const firstResult = searchJson.results?.[0];
+      const placeId = firstResult?.place_id;
+      if (!placeId) {
+        console.warn(`No results for "${name}"`);
+        return { name };
       }
 
-      const json = await res.json();
+      const detailsUrl = `${MAPS_DETAILS_URL}?place_id=${placeId}&fields=photos&key=${apiKey}`;
+      const detailsRes = await fetch(detailsUrl);
+      if (!detailsRes.ok) throw new Error(`Details API error: ${detailsRes.status}`);
+      const detailsJson = await detailsRes.json();
 
-      // Check for Google Maps API specific errors, not just HTTP status
-      if (json.errors) {
-          console.error(`Maps API errors for "${place.name}":`, json.errors);
-          throw new Error(`Maps API reported errors.`);
-      }
+      const photoRef = detailsJson.result?.photos?.[0]?.photo_reference;
+      const photoUrl = photoRef
+        ? `${MAPS_PHOTO_BASE_URL}?maxwidth=800&photo_reference=${photoRef}&key=${apiKey}`
+        : undefined;
 
-      if (json.results && json.results.length > 0) {
-        const firstResult = json.results[0];
-        const photoRef = firstResult.photos?.[0]?.photo_reference;
-        if (photoRef) {
-          photoUrl = `${MAPS_PHOTO_BASE_URL}?maxwidth=800&photo_reference=${photoRef}&key=${apiKey}`;
-        }
-      } else {
-        console.warn(`No Google Places results found for: "${place.name}"`);
-      }
+      return { name, photoUrl };
     } catch (error) {
-      console.error(`Error fetching photo for "${place.name}":`, error);
-      // photoUrl remains undefined
+      console.error(`Error enriching place "${name}":`, error);
+      return { name };
     }
-    return { name: place.name, photoUrl };
   });
 
   return Promise.all(enrichedPromises);
 }
 
-// --- Itinerary Parsing ---
-const parseItineraryMarkdown = (markdown: string, enrichedPlaces: Place[]): ItineraryDay[] => {
+// --- Markdown Parser ---
+function parseItineraryMarkdown(markdown: string, enrichedPlaces: Place[]): ItineraryDay[] {
   if (!markdown) return [];
 
   return markdown.split('###').slice(1).map(block => {
     const lines = block.trim().split('\n');
-    const headingRaw = lines.shift() || '';
+    const heading = lines.shift() || '';
 
-    const photoSuggestionMatch = headingRaw.match(/\[\s*PHOTO_SUGGESTION: "([^"]+)"\s*\]/i);
-    const title = headingRaw.replace(/\[\s*PHOTO_SUGGESTION:[^\]]*\]/ig, '').trim();
+    const photoMatch = heading.match(/\[\s*PHOTO_SUGGESTION:\s*"([^"]+)"\s*\]/i);
+    const title = heading.replace(/\[\s*PHOTO_SUGGESTION:[^\]]+\]/ig, '').trim();
 
-    let dayPhotoUrl: string | undefined = undefined;
-    if (photoSuggestionMatch && photoSuggestionMatch[1]) {
-      const suggestedPlaceName = photoSuggestionMatch[1].toLowerCase();
-      const matchedPlace = enrichedPlaces.find(p => p.name.toLowerCase() === suggestedPlaceName);
-      dayPhotoUrl = matchedPlace?.photoUrl;
-      if (!dayPhotoUrl) {
-          console.warn(`Photo suggestion "${photoSuggestionMatch[1]}" found, but no corresponding photo URL available for "${title}".`);
-      }
+    let dayPhoto: string | undefined;
+    if (photoMatch?.[1]) {
+      const suggestion = photoMatch[1].toLowerCase();
+      dayPhoto = enrichedPlaces.find(p => p.name.toLowerCase() === suggestion)?.photoUrl;
     }
 
     const activities = lines
-      .map(l => l.replace(/^[*-]\s*/, '').trim())
-      .filter(l => l);
+      .map(line => line.replace(/^[-*]\s*/, '').trim())
+      .filter(Boolean);
 
-    return { title, activities, dayPhoto: dayPhotoUrl };
+    return { title, activities, dayPhoto };
   });
-};
+}
 
-// --- Gemini Interaction ---
+// --- Gemini Generator ---
 async function generateItineraryMarkdown(
-    geminiKey: string,
-    places: Place[],
-    days: number,
-    cityName: string
+  geminiKey: string,
+  places: Place[],
+  days: number,
+  cityName: string
 ): Promise<string> {
-    if (!geminiKey) {
-        throw new Error('Gemini API key is missing. Cannot generate itinerary.');
-    }
+  if (!geminiKey) throw new Error('Gemini API key is missing.');
 
-    try {
-        if (!cachedGeminiClient) {
-            cachedGeminiClient = new GoogleGenerativeAI(geminiKey);
-        }
-        const model = cachedGeminiClient.getGenerativeModel({ model: GEMINI_MODEL });
+  if (!cachedGeminiClient) {
+    cachedGeminiClient = new GoogleGenerativeAI(geminiKey);
+  }
 
-        const placeNamesList = places.map((p: Place) => `- ${p.name}`).join('\n');
-        const prompt = `Generate a ${days}-day Markdown itinerary for ${cityName}.
-Each day should follow this format:
-### Day N: Title [PHOTO_SUGGESTION: "Place Name for Photo"]
+  const model = cachedGeminiClient.getGenerativeModel({ model: GEMINI_MODEL });
+  const placeList = places.map(p => `- ${p.name}`).join('\n');
 
-Use 2–4 of the following places in the itinerary:
-${placeNamesList}
+  const prompt = `Generate a ${days}-day Markdown itinerary for ${cityName}.
+Each day starts with "### Day N: Title [PHOTO_SUGGESTION: "Place Name"]"
+Use 2–4 of the following places:
+${placeList}
 
-Focus on creating an engaging and logical day-by-day plan.`;
+Example:
+### Day 1: Welcome to the City [PHOTO_SUGGESTION: "Main Plaza"]
 
-        const generationConfig = { temperature: 0.7 };
+Be engaging and structured.`;
 
-        const result = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig,
-        });
+  const result = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.7 }
+  });
 
-        const markdown = await result.response.text();
-        if (!markdown) {
-            throw new Error('Gemini returned an empty response.');
-        }
-        return markdown;
-
-    } catch (error) {
-        console.error('Error during Gemini content generation:', error);
-        throw new Error('Failed to generate itinerary from Gemini.');
-    }
+  const markdown = await result.response.text();
+  if (!markdown) throw new Error('Empty response from Gemini.');
+  return markdown;
 }
 
 // --- Route Handler ---
@@ -190,61 +164,52 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch (error) {
-    console.error('POST request body parsing failed:', error);
-    return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+    console.error('Failed to parse JSON body:', error);
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const { places = [], tripLength = 3, cityName = 'CityBreaker' } = body;
 
-  // --- Input Validation ---
-  if (!Array.isArray(places) || places.length === 0) {
+  if (!Array.isArray(places) || !places.length) {
     return NextResponse.json({ error: 'A non-empty "places" array is required.' }, { status: 400 });
   }
-  if (typeof cityName !== 'string' || cityName.trim() === '') {
-      return NextResponse.json({ error: 'A valid "cityName" is required.' }, { status: 400 });
-  }
-  if (typeof tripLength !== 'number' || tripLength < 1) {
-      return NextResponse.json({ error: '"tripLength" must be a positive number.' }, { status: 400 });
+
+  if (typeof cityName !== 'string' || !cityName.trim()) {
+    return NextResponse.json({ error: 'A valid "cityName" is required.' }, { status: 400 });
   }
 
-  // Sanitize tripLength
+  if (typeof tripLength !== 'number' || tripLength < MIN_TRIP_DAYS) {
+    return NextResponse.json({ error: `"tripLength" must be at least ${MIN_TRIP_DAYS} days.` }, { status: 400 });
+  }
+
   const days = Math.min(Math.max(tripLength, MIN_TRIP_DAYS), MAX_TRIP_DAYS);
 
-  // --- Retrieve Secrets ---
-  const geminiKey = await getSecret(GEMINI_SECRET_NAME);
-  const mapsApiKey = await getSecret(MAPS_SECRET_NAME);
+  const geminiKey = cachedGeminiKey || await getSecret(GEMINI_SECRET_NAME);
+  const mapsKey = cachedMapsKey || await getSecret(MAPS_SECRET_NAME);
+  if (!geminiKey) return NextResponse.json({ error: 'Missing Gemini key' }, { status: 500 });
 
-  if (!geminiKey) {
-    return NextResponse.json({ error: 'Server configuration error: Gemini API key not available.' }, { status: 500 });
-  }
-  // Maps API key is optional for photo enrichment
+  cachedGeminiKey = geminiKey;
+  cachedMapsKey = mapsKey;
 
-  // --- Enrich Places ---
   let enrichedPlaces: Place[] = [];
   try {
-    enrichedPlaces = await enrichPlacesWithPhotos(places, mapsApiKey);
+    enrichedPlaces = await enrichPlacesWithPhotos(places, mapsKey);
   } catch (error) {
-    console.error("Failed during place enrichment process:", error);
-    // Continue execution, but log the error. Photos might be missing.
-    // If this were critical, you might return an error here.
+    console.error('Place enrichment failed:', error);
   }
 
-  // --- Generate Itinerary Markdown ---
-  let markdownContent: string = '';
   try {
-      markdownContent = await generateItineraryMarkdown(geminiKey, enrichedPlaces, days, cityName);
+    const markdown = await generateItineraryMarkdown(geminiKey, enrichedPlaces, days, cityName);
+    const itinerary = parseItineraryMarkdown(markdown, enrichedPlaces);
+
+    return NextResponse.json({
+      city: cityName,
+      days,
+      places: enrichedPlaces,
+      itinerary
+    });
   } catch (error: any) {
-      console.error('Itinerary generation failed:', error.message);
-      return NextResponse.json({ error: `Failed to generate itinerary: ${error.message}` }, { status: 500 });
-  }
-
-  // --- Parse Markdown and Return JSON Response ---
-  try {
-      const itineraryData = parseItineraryMarkdown(markdownContent, enrichedPlaces);
-      // Return structured itinerary data and the (potentially enriched) places
-      return NextResponse.json({ itinerary: itineraryData, enrichedPlaces });
-  } catch (error) {
-      console.error('Itinerary parsing failed:', error);
-      return NextResponse.json({ error: 'Failed to parse generated itinerary.' }, { status: 500 });
+    console.error('Failed to generate itinerary:', error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
