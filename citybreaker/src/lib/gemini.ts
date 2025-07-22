@@ -3,16 +3,23 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 
 const SECRET_NAME = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
+
 let cachedKey: string;
 let cachedClient: GoogleGenerativeAI;
 
 async function getClient(): Promise<GoogleGenerativeAI> {
   if (cachedClient) return cachedClient;
+
   if (!cachedKey) {
     const sm = new SecretManagerServiceClient();
     const [version] = await sm.accessSecretVersion({ name: SECRET_NAME });
-    cachedKey = version.payload?.data?.toString()!;
+    const payload = version.payload?.data?.toString();
+    if (!payload) {
+      throw new Error('Gemini API key secret payload is missing.');
+    }
+    cachedKey = payload;
   }
+
   cachedClient = new GoogleGenerativeAI(cachedKey);
   return cachedClient;
 }
@@ -31,7 +38,8 @@ export async function getMarkdown(
   const prompt = `Generate a ${days}-day Markdown itinerary for ${cityName}.\nEach day: ### Day N: Title [PHOTO_SUGGESTION: "Place Name"]. Use 2–4 of these places:\n${list}`;
 
   const client = await getClient();
-  const model = client.getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-06-17' });
+  const model = client.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.7 },

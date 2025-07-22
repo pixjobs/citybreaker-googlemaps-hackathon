@@ -22,10 +22,13 @@ const config = {
 const SurpriseRequestSchema = z.object({
   prompt: z.enum(['hungry', 'entertain', 'surprise']),
   city: z.object({
-    name: z.string().min(1), lat: z.number(), lng: z.number(),
+    name: z.string().min(1),
+    lat: z.number(),
+    lng: z.number(),
   }),
 });
 
+// --- MODIFICATION: Added 'geometry' to the interface ---
 interface GooglePlace {
   place_id: string;
   name: string;
@@ -33,16 +36,26 @@ interface GooglePlace {
   photos?: { photo_reference: string }[];
   formatted_address?: string;
   website?: string;
+  geometry?: {
+    location: {
+      lat: number;
+      lng: number;
+    };
+  };
 }
 
 let cachedSecrets: { geminiKey?: string; mapsKey?: string } = {};
 const cachedClients: { gemini?: GoogleGenerativeAI; secretManager?: SecretManagerServiceClient } = {};
 
 async function getSecret(secretName: string): Promise<string> {
-  if (!cachedClients.secretManager) cachedClients.secretManager = new SecretManagerServiceClient();
+  if (!cachedClients.secretManager) {
+    cachedClients.secretManager = new SecretManagerServiceClient();
+  }
   const [version] = await cachedClients.secretManager.accessSecretVersion({ name: secretName });
   const data = version.payload?.data?.toString();
-  if (!data) throw new Error(`Secret '${secretName}' is empty.`);
+  if (!data) {
+    throw new Error(`Secret '${secretName}' is empty.`);
+  }
   return data;
 }
 
@@ -69,15 +82,21 @@ async function findPlacesResiliently(params: {
       type: params.type,
       key: params.apiKey,
     });
-    if (opennow) searchParams.set('opennow', 'true');
+    if (opennow) {
+      searchParams.set('opennow', 'true');
+    }
     const res = await fetch(`${config.maps.textSearchUrl}?${searchParams.toString()}`);
-    if (!res.ok) throw new Error(`Maps TextSearch API error: ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`Maps TextSearch API error: ${res.status}`);
+    }
     const data = await res.json();
     return data.results || [];
   };
 
   let places = await search(true);
-  if (places.length < 3) places = await search(false);
+  if (places.length < 3) {
+    places = await search(false);
+  }
   return places;
 }
 
@@ -88,7 +107,7 @@ export async function POST(req: NextRequest) {
     if (!validationResult.success) {
       return NextResponse.json(
         { error: 'Invalid request body.', details: validationResult.error.flatten() },
-        { status: 400 }
+        { status: 400 },
       );
     }
     const { prompt, city } = validationResult.data;
@@ -102,7 +121,9 @@ export async function POST(req: NextRequest) {
     }
 
     const { geminiKey, mapsKey } = cachedSecrets;
-    if (!geminiKey || !mapsKey) throw new Error("API keys not loaded.");
+    if (!geminiKey || !mapsKey) {
+      throw new Error('API keys not loaded.');
+    }
 
     const allPlaces = await findPlacesResiliently({
       keyword: getPlaceQueryForPrompt(prompt).keyword,
@@ -113,8 +134,8 @@ export async function POST(req: NextRequest) {
 
     if (allPlaces.length === 0) {
       return NextResponse.json(
-        { error: "We searched high and low but couldn’t find a matching spot. Try again!" },
-        { status: 404 }
+        { error: 'We searched high and low but couldn’t find a matching spot. Try again!' },
+        { status: 404 },
       );
     }
 
@@ -123,9 +144,10 @@ export async function POST(req: NextRequest) {
 
     const suggestionPromises = placesToSuggest.map(async (place) => {
       try {
+        // --- MODIFICATION: Added 'geometry' to the fields parameter ---
         const detailsParams = new URLSearchParams({
           place_id: place.place_id,
-          fields: 'name,formatted_address,rating,photos,website',
+          fields: 'name,formatted_address,rating,photos,website,geometry',
           key: mapsKey,
         });
 
@@ -134,12 +156,14 @@ export async function POST(req: NextRequest) {
 
         const detailsData = await detailsRes.json();
         const details: GooglePlace = detailsData.result;
-        if (!details) return null;
+        if (!details || !details.geometry) return null;
 
-        if (!cachedClients.gemini) cachedClients.gemini = new GoogleGenerativeAI(geminiKey);
+        if (!cachedClients.gemini) {
+          cachedClients.gemini = new GoogleGenerativeAI(geminiKey);
+        }
         const model = cachedClients.gemini.getGenerativeModel({
           model: config.gemini.model,
-          generationConfig: { responseMimeType: "application/json" },
+          generationConfig: { responseMimeType: 'application/json' },
         });
 
         const geminiPrompt = `
@@ -164,11 +188,11 @@ export async function POST(req: NextRequest) {
         try {
           geminiData = JSON.parse(geminiText);
         } catch {
-          console.error("Failed to parse Gemini JSON:", geminiText);
+          console.error('Failed to parse Gemini JSON:', geminiText);
           geminiData = {
             description: geminiText,
-            whyWorthIt: "An unforgettable local experience!",
-            transportInfo: "Check local maps for the best route.",
+            whyWorthIt: 'An unforgettable local experience!',
+            transportInfo: 'Check local maps for the best route.',
           };
         }
 
@@ -177,7 +201,8 @@ export async function POST(req: NextRequest) {
           : config.fallbackPhotoUrl;
 
         const tripAdvisorUrl = `https://www.tripadvisor.com/Search?q=${encodeURIComponent(details.name + ' ' + city.name)}`;
-
+        
+        // --- MODIFICATION: Added 'lat' and 'lng' to the final returned object ---
         return {
           name: details.name,
           photoUrl,
@@ -188,6 +213,8 @@ export async function POST(req: NextRequest) {
           rating: details.rating,
           website: details.website,
           tripAdvisorUrl,
+          lat: details.geometry.location.lat,
+          lng: details.geometry.location.lng,
         };
       } catch (err) {
         console.error(`Failed to process place ID ${place.place_id}:`, err);
@@ -196,13 +223,14 @@ export async function POST(req: NextRequest) {
     });
 
     const suggestions = (await Promise.all(suggestionPromises)).filter(Boolean);
-    if (suggestions.length === 0) throw new Error("Could not generate suggestions.");
+    if (suggestions.length === 0) {
+      throw new Error('Could not generate suggestions.');
+    }
 
     return NextResponse.json(suggestions);
-
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "An internal server error occurred.";
-    console.error("Surprise Me API Error:", error);
+    const message = error instanceof Error ? error.message : 'An internal server error occurred.';
+    console.error('Surprise Me API Error:', error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

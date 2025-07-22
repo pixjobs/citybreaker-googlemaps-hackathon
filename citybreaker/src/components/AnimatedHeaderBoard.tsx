@@ -9,8 +9,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Globe,
   Compass,
-  Landmark,
-  Utensils,
   MapPinned,
   Menu,
   X,
@@ -23,27 +21,18 @@ interface City {
   lng: number;
 }
 
-// Note: The menuItems array is now generated inside the component
-// to access props for dynamic labels and active states.
-
 export default function AnimatedHeaderBoard({
   cities,
   onSelectCity,
   onMenuAction,
   onPlaceSelect,
-  // New props to receive the current state from the parent
   isSatelliteView,
-  showLandmarks,
-  showRestaurants,
 }: {
   cities: City[];
   onSelectCity: (city: City) => void;
   onMenuAction: (action: string) => void;
   onPlaceSelect: (placeId: string) => void;
-  // Prop types for the new state trackers
   isSatelliteView: boolean;
-  showLandmarks: boolean;
-  showRestaurants: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -53,37 +42,21 @@ export default function AnimatedHeaderBoard({
   const [boardTop, setBoardTop] = useState(0);
   const [mounted, setMounted] = useState(false);
 
-  // Define menuItems inside the component to make them dynamic
   const menuItems = [
     { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me", active: false },
     { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary", active: false },
-    { 
-      label: isSatelliteView ? "Toggle Map View" : "Toggle Satellite", 
-      icon: <Globe size={18} />, 
+    {
+      label: isSatelliteView ? "Toggle Map View" : "Toggle Satellite",
+      icon: <Globe size={18} />,
       action: "toggle-satellite",
-      active: isSatelliteView 
-    },
-    { 
-      label: "Landmarks", 
-      icon: <Landmark size={18} />, 
-      action: "toggle-landmarks", 
-      active: showLandmarks 
-    },
-    { 
-      label: "Restaurants", 
-      icon: <Utensils size={18} />, 
-      action: "toggle-restaurants",
-      active: showRestaurants
+      active: isSatelliteView,
     },
   ];
 
-
-  // Mark client-side mount
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Entrance animation
   useEffect(() => {
     if (containerRef.current) {
       gsap.fromTo(
@@ -94,12 +67,11 @@ export default function AnimatedHeaderBoard({
     }
   }, []);
 
-  // Compute board position after mount/resizes
   useLayoutEffect(() => {
     function updateTop() {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        const gap = window.innerWidth < 640 ? 24 : 12; // larger gap on mobile
+        const gap = window.innerWidth < 640 ? 24 : 12;
         setBoardTop(rect.bottom + gap);
       }
     }
@@ -108,7 +80,6 @@ export default function AnimatedHeaderBoard({
     return () => window.removeEventListener("resize", updateTop);
   }, []);
 
-  // Close menu when clicking outside
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -119,7 +90,6 @@ export default function AnimatedHeaderBoard({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [menuOpen]);
 
-  // Toggle flap board
   const toggleBoard = () => {
     const isOpen = !expanded;
     setExpanded(isOpen);
@@ -129,19 +99,21 @@ export default function AnimatedHeaderBoard({
         opacity: isOpen ? 1 : 0,
         duration: 0.5,
         ease: "power2.out",
-        onStart: () => { if (isOpen) boardRef.current!.style.display = "block"; },
-        onComplete: () => { if (!isOpen) boardRef.current!.style.display = "none"; },
+        onStart: () => {
+          if (isOpen) boardRef.current!.style.display = "block";
+        },
+        onComplete: () => {
+          if (!isOpen) boardRef.current!.style.display = "none";
+        },
       });
     }
   };
 
-  // City selection from flap board
   const handleCitySelectAndClose = (city: City) => {
     onSelectCity(city);
     if (expanded) toggleBoard();
   };
 
-  // Menu item click
   const handleItemClick = (action: string) => {
     onMenuAction(action);
     setMenuOpen(false);
@@ -181,13 +153,12 @@ export default function AnimatedHeaderBoard({
                     transition={{ duration: 0.2 }}
                     className="absolute right-0 mt-2 bg-black/90 backdrop-blur-lg border border-yellow-400 text-yellow-200 rounded-lg shadow-lg z-50 min-w-[200px] overflow-hidden"
                   >
-                    {menuItems.map(item => (
+                    {menuItems.map((item) => (
                       <button
                         key={item.label}
                         onClick={() => handleItemClick(item.action)}
-                        // Apply a visual style for active toggles
                         className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-yellow-600/20 text-left transition-colors ${
-                          item.active ? 'bg-yellow-500/20' : ''
+                          item.active ? "bg-yellow-500/20" : ""
                         }`}
                       >
                         {item.icon}
@@ -206,7 +177,7 @@ export default function AnimatedHeaderBoard({
         <div
           ref={boardRef}
           className="fixed left-1/2 -translate-x-1/2 w-11/12 max-w-3xl z-40 bg-black/60 backdrop-blur-lg border border-yellow-500/50 border-t-0 rounded-b-xl shadow-lg overflow-hidden"
-          style={{ top: boardTop, height: 0, opacity: 0, display: 'none' }}
+          style={{ top: boardTop, height: 0, opacity: 0, display: "none" }}
         >
           <SplitFlapBoard
             cities={cities}

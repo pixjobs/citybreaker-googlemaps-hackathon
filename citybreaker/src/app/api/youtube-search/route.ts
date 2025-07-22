@@ -44,13 +44,19 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ videos });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('YouTube API Error:', error);
-    if (error.code === 403) {
+
+    const err = error as { code?: number; message?: string };
+
+    if (err.code === 403) {
       return NextResponse.json({
         error: 'YouTube API request forbidden. Check API key access or quota.',
       }, { status: 403 });
     }
-    return NextResponse.json({ error: 'Failed to fetch YouTube videos' }, { status: 500 });
+
+    return NextResponse.json({
+      error: err.message || 'Failed to fetch YouTube videos',
+    }, { status: 500 });
   }
 }

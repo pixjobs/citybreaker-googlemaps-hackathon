@@ -24,6 +24,7 @@ const retroDarkStyle: google.maps.MapTypeStyle[] = [
   { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#facc15" }] },
 ];
 
+// --- Type Definitions ---
 interface BasicPlaceInfo {
   name: string;
   address: string;
@@ -33,6 +34,18 @@ interface PlacePhotoInfo {
   name: string;
   photoUrl?: string;
 }
+
+// FIX: Define a type for the editorial summary to avoid 'any'
+interface PlaceEditorialSummary {
+    language?: string;
+    overview?: string;
+}
+
+// FIX: Extend the base PlaceResult type to include the editorial_summary
+interface PlaceResultWithSummary extends google.maps.places.PlaceResult {
+    editorial_summary?: PlaceEditorialSummary;
+}
+
 interface CityMapProps {
   center: { lat: number; lng: number; zoom: number; name: string };
   tripLength?: number;
@@ -40,7 +53,6 @@ interface CityMapProps {
   selectedPlaceId?: string | null;
   isItineraryOpen: boolean;
   onCloseItinerary: () => void;
-  // New props to handle actions from the header
   isSatelliteView: boolean;
   showLandmarks: boolean;
   showRestaurants: boolean;
@@ -81,7 +93,6 @@ export default function CityMap({
   const mapRef = useRef<google.maps.Map | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   
-  // Refs for different categories of markers
   const attractionMarkersRef = useRef<google.maps.Marker[]>([]);
   const landmarkMarkersRef = useRef<google.maps.Marker[]>([]);
   const restaurantMarkersRef = useRef<google.maps.Marker[]>([]);
@@ -99,10 +110,10 @@ export default function CityMap({
 
   useAnimatedPanel(panelRef, isItineraryOpen);
 
-  const clearMarkers = (markers: React.MutableRefObject<google.maps.Marker[]>) => {
+  const clearMarkers = useCallback((markers: React.MutableRefObject<google.maps.Marker[]>) => {
     markers.current.forEach(m => m.setMap(null));
     markers.current = [];
-  };
+  }, []);
 
   const fetchAndShowPlaceDetails = useCallback(async (placeId: string) => {
     if (!isLoaded || !mapRef.current) return;
@@ -118,7 +129,7 @@ export default function CityMap({
     const service = new window.google.maps.places.PlacesService(mapRef.current);
     const request: google.maps.places.PlaceDetailsRequest = {
       placeId,
-      fields: ["name", "geometry", "photos", "formatted_address", "website", "rating", "reviews"],
+      fields: ["name", "geometry", "photos", "formatted_address", "website", "rating", "reviews", "editorial_summary"],
     };
 
     service.getDetails(request, async (place, status) => {
@@ -141,7 +152,8 @@ export default function CityMap({
         website: place.website,
         rating: place.rating,
         reviews: place.reviews,
-        editorial_summary: (place as any).editorial_summary,
+        // FIX: Cast to our custom type instead of 'any'
+        editorial_summary: (place as PlaceResultWithSummary).editorial_summary,
       });
 
       try {
@@ -161,7 +173,6 @@ export default function CityMap({
     });
   }, [isLoaded]);
   
-  // Effect to initialize map and handle base layer of tourist attractions
   useEffect(() => {
     if (!isLoaded || !window.google?.maps?.Map) return;
 
@@ -169,7 +180,6 @@ export default function CityMap({
     setItinerary(null);
     setPlacePhotos([]);
 
-    // Clear all markers when city changes
     clearMarkers(attractionMarkersRef);
     clearMarkers(landmarkMarkersRef);
     clearMarkers(restaurantMarkersRef);
@@ -181,7 +191,8 @@ export default function CityMap({
         disableDefaultUI: true,
         styles: retroDarkStyle,
       });
-      mapRef.current.addListener("click", (e: any) => {
+      // FIX: Use the correct event type 'google.maps.MapMouseEvent' instead of 'any'
+      mapRef.current.addListener("click", (e: google.maps.MapMouseEvent) => {
         if (e.placeId) {
           e.stop();
           fetchAndShowPlaceDetails(e.placeId);
@@ -233,9 +244,8 @@ export default function CityMap({
         }
       }
     );
-  }, [isLoaded, center, tripLength, fetchAndShowPlaceDetails, onPlacesLoaded]);
+  }, [isLoaded, center, tripLength, fetchAndShowPlaceDetails, onPlacesLoaded, clearMarkers]);
   
-  // Effect to handle satellite view toggle
   useEffect(() => {
     if (!mapRef.current) return;
     const isCurrentlySatellite = mapRef.current.getMapTypeId() === 'satellite';
@@ -247,7 +257,6 @@ export default function CityMap({
     }
   }, [isSatelliteView]);
 
-  // Reusable function to search for and display different types of places
   const searchAndDisplayPlaces = useCallback((
     placeType: string, 
     markersRef: React.MutableRefObject<google.maps.Marker[]>, 
@@ -260,7 +269,7 @@ export default function CityMap({
     const service = new window.google.maps.places.PlacesService(mapRef.current);
     service.nearbySearch({
       location: new window.google.maps.LatLng(center.lat, center.lng),
-      radius: 15000, // Slightly smaller radius for more specific results
+      radius: 15000,
       type: placeType,
     }, (results, status) => {
       if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
@@ -277,26 +286,23 @@ export default function CityMap({
         });
       }
     });
-  }, [isLoaded, center, fetchAndShowPlaceDetails]);
+  }, [isLoaded, center, fetchAndShowPlaceDetails, clearMarkers]);
 
-  // Effect for landmarks
   useEffect(() => {
     if (showLandmarks) {
       searchAndDisplayPlaces('landmark', landmarkMarkersRef, '/landmark-marker.png');
     } else {
       clearMarkers(landmarkMarkersRef);
     }
-  }, [showLandmarks, searchAndDisplayPlaces]);
+  }, [showLandmarks, searchAndDisplayPlaces, clearMarkers]);
   
-  // Effect for restaurants
   useEffect(() => {
     if (showRestaurants) {
       searchAndDisplayPlaces('restaurant', restaurantMarkersRef, '/restaurant-marker.png');
     } else {
       clearMarkers(restaurantMarkersRef);
     }
-  }, [showRestaurants, searchAndDisplayPlaces]);
-
+  }, [showRestaurants, searchAndDisplayPlaces, clearMarkers]);
 
   useEffect(() => {
     if (selectedPlaceId) fetchAndShowPlaceDetails(selectedPlaceId);
