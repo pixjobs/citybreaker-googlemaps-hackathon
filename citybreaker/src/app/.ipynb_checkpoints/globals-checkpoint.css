@@ -69,3 +69,19 @@ body {
   border-radius: 1rem;
   transition: all var(--transition);
 }
+
+.prompt-button {
+  @apply w-full max-w-xs flex items-center justify-center gap-3 bg-black/50 border border-yellow-500/40 rounded-lg px-4 py-3 text-yellow-200 font-semibold tracking-wider transition-all duration-300 hover:bg-yellow-500/20 hover:border-yellow-500 hover:scale-105;
+}
+
+.suggestion-section {
+  @apply border-l-2 border-yellow-500/30 pl-3 text-sm;
+}
+
+.suggestion-section-header {
+  @apply flex items-center gap-2 text-xs font-bold text-yellow-300 mb-1 tracking-wider uppercase;
+}
+
+.link-button {
+  @apply flex-1 flex items-center justify-center gap-2 text-xs bg-yellow-800/50 text-yellow-200 px-3 py-2 rounded-md transition-colors hover:bg-yellow-700/70;
+}

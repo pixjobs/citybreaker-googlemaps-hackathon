@@ -12,7 +12,7 @@ import path from 'path';
 const GEMINI_SECRET = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
 const MAPS_SECRET = 'projects/934477100130/secrets/maps-api-key/versions/latest';
 const BUCKET_NAME = 'citybreaker-downloads';
-const GEMINI_MODEL = 'gemini-2.5-flash-lite-preview-06-17';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 const PHOTO_URL = 'https://maps.googleapis.com/maps/api/place/photo';
@@ -172,8 +172,10 @@ export async function POST(req: NextRequest) {
         }
       });
     }
-  } catch (error: any) {
+
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error occurred.';
     console.error('PDF route error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

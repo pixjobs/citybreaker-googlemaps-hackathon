@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { FaSpinner, FaTimes, FaFilePdf } from 'react-icons/fa';
 import gsap from 'gsap';
 import { saveAs } from 'file-saver';
+import Image from 'next/image';
 
 interface PlacePhotoInfo {
   name: string;
@@ -21,7 +22,7 @@ interface ItineraryPanelProps {
   placePhotos: PlacePhotoInfo[];
   onClose: () => void;
   tripLength: number;
-  onTripLengthChange?: (days: number) => void; // made optional
+  onTripLengthChange?: (days: number) => void;
 }
 
 const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
@@ -98,9 +99,14 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
         alert(`PDF generation failed: ${error.error || res.statusText}`);
       } else {
         const blob = await res.blob();
-        const filename =
-          res.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') ||
-          `${cityName.replace(/\s+/g, '_')}_${currentTripLength}d_Itinerary.pdf`;
+        const contentDisposition = res.headers.get('Content-Disposition');
+        let filename = `${cityName.replace(/\s+/g, '_')}_${currentTripLength}d_Itinerary.pdf`;
+        if (contentDisposition) {
+          const match = /filename="([^"]+)"/.exec(contentDisposition);
+          if (match && match[1]) {
+            filename = match[1];
+          }
+        }
         saveAs(blob, filename);
       }
     } catch (err) {
@@ -113,7 +119,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
 
   const handleDaysChange = (days: number) => {
     setCurrentTripLength(days);
-    onTripLengthChange?.(days); // safe call
+    onTripLengthChange?.(days);
   };
 
   useEffect(() => {
@@ -151,10 +157,12 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
       const photos = matches.map(m => m.photoUrl).filter(Boolean);
 
       if (photos.length > 1) {
-        const slides = container.querySelectorAll('img');
+        const slides = Array.from(container.children) as HTMLElement[];
+        
         gsap.set(slides, { opacity: 0 });
+
         const tl = gsap.timeline({ repeat: -1 });
-        slides.forEach((slide, idx) => {
+        slides.forEach(slide => { // Removed '_' as it's not used
           tl.to(slide, { opacity: 1, duration: 1 });
           tl.to(slide, { opacity: 0, duration: 1 }, "+=2");
         });
@@ -166,11 +174,11 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
   const hasData = itineraryData.length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4 pt-6 sm:pt-4">
       <div ref={panelRef} className="w-full max-w-3xl h-[85vh] bg-[#0f0f0f] text-[#f5f5f5] font-sans rounded-2xl overflow-y-auto shadow-2xl relative">
-        <div className="sticky top-0 bg-[#1a1a1a] p-4 flex justify-between items-center border-b border-gray-800 z-10">
-          <h2 className="text-xl font-bold tracking-wide text-[#FFD600]">{cityName} Itinerary</h2>
-          <div className="flex items-center gap-2">
+        <div className="sticky top-0 bg-[#1a1a1a] p-4 flex flex-wrap gap-2 justify-between items-center border-b border-gray-800 z-10">
+          <h2 className="text-xl font-bold tracking-wide text-[#FFD600] w-full sm:w-auto">{cityName} Itinerary</h2>
+          <div className="flex items-center gap-2 ml-auto">
             <select
               value={currentTripLength}
               onChange={e => handleDaysChange(Number(e.target.value))}
@@ -204,7 +212,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
         </div>
 
         {hasData && (
-          <div className="sticky top-[64px] bg-[#1a1a1a] border-b border-gray-800 flex">
+          <div className="sticky top-[64px] bg-[#1a1a1a] border-b border-gray-800 flex flex-wrap">
             {itineraryData.map((_, i) => (
               <button
                 key={i}
@@ -221,7 +229,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
           </div>
         )}
 
-        <div className="p-6 space-y-10">
+        <div className="p-6 space-y-12">
           {panelLoading ? (
             <div className="flex justify-center py-20">
               <FaSpinner className="animate-spin text-gray-500" size={28} />
@@ -243,16 +251,19 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
                       ref={el => (carouselRefs.current[i] = el)}
                     >
                       {photos.map((url, j) => (
-                        <img
+                        <Image
                           key={j}
-                          src={url}
-                          alt={`Slide ${j + 1}`}
-                          className="absolute top-0 left-0 w-full h-full object-cover opacity-0"
+                          src={url!}
+                          alt={`Photo for ${day.title} Day ${i + 1}`}
+                          fill
+                          className="object-cover rounded-md"
+                          sizes="(max-width: 768px) 100vw, 768px"
+                          priority={i === 0 && j === 0}
                         />
                       ))}
                     </div>
                   )}
-                  <ul className="list-disc list-inside text-sm text-gray-300 space-y-1">
+                  <ul className="list-disc list-inside text-sm text-gray-300 space-y-1 pl-4">
                     {day.activities.map((a, j) => (
                       <li key={j}>{a}</li>
                     ))}

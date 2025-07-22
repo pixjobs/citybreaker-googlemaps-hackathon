@@ -9,7 +9,7 @@ const MAPS_SECRET_NAME = 'projects/845341257082/secrets/maps-api-key/versions/la
 const MAPS_TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const MAPS_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 const MAPS_PHOTO_BASE_URL = 'https://maps.googleapis.com/maps/api/place/photo';
-const GEMINI_MODEL = 'gemini-2.5-flash-lite-preview-06-17';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const MAX_TRIP_DAYS = 7;
 const MIN_TRIP_DAYS = 3;
 
@@ -18,13 +18,16 @@ interface Place {
   photoUrl?: string;
 }
 
+interface IncomingPlace {
+  name: string;
+}
+
 interface ItineraryDay {
   title: string;
   activities: string[];
   dayPhoto?: string;
 }
 
-// --- Secret Management ---
 let cachedGeminiKey: string | null = null;
 let cachedMapsKey: string | null = null;
 let cachedGeminiClient: GoogleGenerativeAI | null = null;
@@ -53,11 +56,10 @@ async function getSecret(secretName: string): Promise<string | null> {
   }
 }
 
-// --- Enrichment ---
-async function enrichPlacesWithPhotos(places: any[], apiKey: string | null): Promise<Place[]> {
+async function enrichPlacesWithPhotos(places: IncomingPlace[], apiKey: string | null): Promise<Place[]> {
   if (!apiKey) {
     console.warn('Maps API key is missing. Returning places without photos.');
-    return places.map((p: any) => ({ name: p?.name || 'Unknown Place' }));
+    return places.map((p: IncomingPlace) => ({ name: p?.name || 'Unknown Place' }));
   }
 
   const enrichedPromises = places.map(async (place) => {
@@ -97,7 +99,6 @@ async function enrichPlacesWithPhotos(places: any[], apiKey: string | null): Pro
   return Promise.all(enrichedPromises);
 }
 
-// --- Markdown Parser ---
 function parseItineraryMarkdown(markdown: string, enrichedPlaces: Place[]): ItineraryDay[] {
   if (!markdown) return [];
 
@@ -122,7 +123,6 @@ function parseItineraryMarkdown(markdown: string, enrichedPlaces: Place[]): Itin
   });
 }
 
-// --- Gemini Generator ---
 async function generateItineraryMarkdown(
   geminiKey: string,
   places: Place[],
@@ -158,7 +158,6 @@ Be engaging and structured.`;
   return markdown;
 }
 
-// --- Route Handler ---
 export async function POST(req: NextRequest) {
   let body;
   try {
@@ -168,7 +167,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { places = [], tripLength = 3, cityName = 'CityBreaker' } = body;
+  const { places = [], tripLength = 3, cityName = 'CityBreaker' } = body as {
+    places: IncomingPlace[];
+    tripLength?: number;
+    cityName?: string;
+  };
 
   if (!Array.isArray(places) || !places.length) {
     return NextResponse.json({ error: 'A non-empty "places" array is required.' }, { status: 400 });
@@ -208,8 +211,12 @@ export async function POST(req: NextRequest) {
       places: enrichedPlaces,
       itinerary
     });
-  } catch (error: any) {
-    console.error('Failed to generate itinerary:', error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    let errorMessage = 'An unknown error occurred.';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+    console.error('Failed to generate itinerary:', errorMessage);
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

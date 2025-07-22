@@ -1,18 +1,34 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["cesium"],
-  webpack(config) {
-    // Cesium expects these environment variables to resolve correctly
-    config.resolve.alias = {
-      ...(config.resolve.alias || {}),
-      cesium: "cesium/Cesium",
-    };
-
-    return config;
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "maps.googleapis.com",
+        port: "",
+        pathname: "/maps/api/place/photo",
+      },
+      {
+        protocol: "https",
+        hostname: "maps.googleapis.com",
+        port: "",
+        pathname: "/maps/api/place/js/PhotoService.GetPhoto/**",
+      },
+      {
+        protocol: "https",
+        hostname: "i.ytimg.com",
+        port: "",
+        pathname: "/vi/**",
+      },
+      {
+        protocol: "https",
+        hostname: "lh3.googleusercontent.com",
+        port: "",
+        pathname: "/**",
+      },
+    ],
   },
-  // you can add more options here if needed
-  // e.g. reactStrictMode: true,
 };
 
 export default nextConfig;

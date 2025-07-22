@@ -48,8 +48,9 @@ export async function POST(req: NextRequest) {
       reviews: result?.reviews,
       photoUrl,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error occurred';
     console.error('Place details fetch failed:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

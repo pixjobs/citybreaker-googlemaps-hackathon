@@ -23,24 +23,27 @@ interface City {
   lng: number;
 }
 
-const menuItems = [
-  { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me" },
-  { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary" },
-  { label: "Toggle Satellite", icon: <Globe size={18} />, action: "toggle-satellite" },
-  { label: "Landmarks", icon: <Landmark size={18} />, action: "toggle-landmarks" },
-  { label: "Restaurants", icon: <Utensils size={18} />, action: "toggle-restaurants" },
-];
+// Note: The menuItems array is now generated inside the component
+// to access props for dynamic labels and active states.
 
 export default function AnimatedHeaderBoard({
   cities,
   onSelectCity,
   onMenuAction,
   onPlaceSelect,
+  // New props to receive the current state from the parent
+  isSatelliteView,
+  showLandmarks,
+  showRestaurants,
 }: {
   cities: City[];
   onSelectCity: (city: City) => void;
   onMenuAction: (action: string) => void;
   onPlaceSelect: (placeId: string) => void;
+  // Prop types for the new state trackers
+  isSatelliteView: boolean;
+  showLandmarks: boolean;
+  showRestaurants: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -49,6 +52,31 @@ export default function AnimatedHeaderBoard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [boardTop, setBoardTop] = useState(0);
   const [mounted, setMounted] = useState(false);
+
+  // Define menuItems inside the component to make them dynamic
+  const menuItems = [
+    { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me", active: false },
+    { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary", active: false },
+    { 
+      label: isSatelliteView ? "Toggle Map View" : "Toggle Satellite", 
+      icon: <Globe size={18} />, 
+      action: "toggle-satellite",
+      active: isSatelliteView 
+    },
+    { 
+      label: "Landmarks", 
+      icon: <Landmark size={18} />, 
+      action: "toggle-landmarks", 
+      active: showLandmarks 
+    },
+    { 
+      label: "Restaurants", 
+      icon: <Utensils size={18} />, 
+      action: "toggle-restaurants",
+      active: showRestaurants
+    },
+  ];
+
 
   // Mark client-side mount
   useEffect(() => {
@@ -157,7 +185,10 @@ export default function AnimatedHeaderBoard({
                       <button
                         key={item.label}
                         onClick={() => handleItemClick(item.action)}
-                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-yellow-600/20 text-left transition-colors"
+                        // Apply a visual style for active toggles
+                        className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-yellow-600/20 text-left transition-colors ${
+                          item.active ? 'bg-yellow-500/20' : ''
+                        }`}
                       >
                         {item.icon}
                         <span className="text-sm">{item.label}</span>

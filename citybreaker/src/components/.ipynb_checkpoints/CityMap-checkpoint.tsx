@@ -40,6 +40,10 @@ interface CityMapProps {
   selectedPlaceId?: string | null;
   isItineraryOpen: boolean;
   onCloseItinerary: () => void;
+  // New props to handle actions from the header
+  isSatelliteView: boolean;
+  showLandmarks: boolean;
+  showRestaurants: boolean;
 }
 
 function useAnimatedPanel(
@@ -69,11 +73,18 @@ export default function CityMap({
   selectedPlaceId,
   isItineraryOpen,
   onCloseItinerary,
+  isSatelliteView,
+  showLandmarks,
+  showRestaurants,
 }: CityMapProps) {
   const { isLoaded } = useMaps();
   const mapRef = useRef<google.maps.Map | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<google.maps.Marker[]>([]);
+  
+  // Refs for different categories of markers
+  const attractionMarkersRef = useRef<google.maps.Marker[]>([]);
+  const landmarkMarkersRef = useRef<google.maps.Marker[]>([]);
+  const restaurantMarkersRef = useRef<google.maps.Marker[]>([]);
 
   const [itinerary, setItinerary] = useState<string | null>(null);
   const [placePhotos, setPlacePhotos] = useState<PlacePhotoInfo[]>([]);
@@ -88,12 +99,10 @@ export default function CityMap({
 
   useAnimatedPanel(panelRef, isItineraryOpen);
 
-  useEffect(() => {
-    if (mapRef.current) {
-      mapRef.current.panTo({ lat: center.lat, lng: center.lng });
-      mapRef.current.setZoom(center.zoom);
-    }
-  }, [center]);
+  const clearMarkers = (markers: React.MutableRefObject<google.maps.Marker[]>) => {
+    markers.current.forEach(m => m.setMap(null));
+    markers.current = [];
+  };
 
   const fetchAndShowPlaceDetails = useCallback(async (placeId: string) => {
     if (!isLoaded || !mapRef.current) return;
@@ -151,13 +160,19 @@ export default function CityMap({
       setIsDetailsLoading(false);
     });
   }, [isLoaded]);
-
+  
+  // Effect to initialize map and handle base layer of tourist attractions
   useEffect(() => {
     if (!isLoaded || !window.google?.maps?.Map) return;
 
     setIsLoading(true);
     setItinerary(null);
     setPlacePhotos([]);
+
+    // Clear all markers when city changes
+    clearMarkers(attractionMarkersRef);
+    clearMarkers(landmarkMarkersRef);
+    clearMarkers(restaurantMarkersRef);
 
     if (!mapRef.current) {
       mapRef.current = new window.google.maps.Map(document.getElementById("map") as HTMLElement, {
@@ -172,24 +187,29 @@ export default function CityMap({
           fetchAndShowPlaceDetails(e.placeId);
         }
       });
+    } else {
+        mapRef.current.panTo({ lat: center.lat, lng: center.lng });
+        mapRef.current.setZoom(center.zoom);
     }
-
+    
     const service = new window.google.maps.places.PlacesService(mapRef.current!);
     service.nearbySearch(
       { location: new window.google.maps.LatLng(center.lat, center.lng), radius: 20000, type: "tourist_attraction" },
       async (results, status) => {
         if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
-          markersRef.current.forEach(m => m.setMap(null));
-          markersRef.current = [];
-
           const photos = results.map(p => ({ name: p.name || "", photoUrl: p.photos?.[0]?.getUrl({ maxWidth: 1920, maxHeight: 1080 }) }));
           setPlacePhotos(photos.filter(p => p.name));
           onPlacesLoaded?.(photos.map(p => p.photoUrl!).filter(Boolean));
 
           results.forEach(p => {
             if (!p.geometry?.location || !p.name || !p.place_id) return;
-            const marker = new window.google.maps.Marker({ position: p.geometry.location, map: mapRef.current!, title: p.name });
-            markersRef.current.push(marker);
+            const marker = new window.google.maps.Marker({
+              position: p.geometry.location,
+              map: mapRef.current!,
+              title: p.name,
+              icon: { url: "/marker.png", scaledSize: new google.maps.Size(40, 40) },
+            });
+            attractionMarkersRef.current.push(marker);
             marker.addListener("click", () => fetchAndShowPlaceDetails(p.place_id!));
           });
 
@@ -208,12 +228,75 @@ export default function CityMap({
             setIsLoading(false);
           }
         } else {
-          console.error("NearbySearch failed:", status);
+          console.error("NearbySearch for attractions failed:", status);
           setIsLoading(false);
         }
       }
     );
   }, [isLoaded, center, tripLength, fetchAndShowPlaceDetails, onPlacesLoaded]);
+  
+  // Effect to handle satellite view toggle
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const isCurrentlySatellite = mapRef.current.getMapTypeId() === 'satellite';
+    if (isSatelliteView && !isCurrentlySatellite) {
+      mapRef.current.setMapTypeId('satellite');
+    } else if (!isSatelliteView && isCurrentlySatellite) {
+      mapRef.current.setMapTypeId('roadmap');
+      mapRef.current.setOptions({ styles: retroDarkStyle });
+    }
+  }, [isSatelliteView]);
+
+  // Reusable function to search for and display different types of places
+  const searchAndDisplayPlaces = useCallback((
+    placeType: string, 
+    markersRef: React.MutableRefObject<google.maps.Marker[]>, 
+    iconUrl: string
+  ) => {
+    if (!isLoaded || !mapRef.current) return;
+    
+    clearMarkers(markersRef);
+
+    const service = new window.google.maps.places.PlacesService(mapRef.current);
+    service.nearbySearch({
+      location: new window.google.maps.LatLng(center.lat, center.lng),
+      radius: 15000, // Slightly smaller radius for more specific results
+      type: placeType,
+    }, (results, status) => {
+      if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+        results.forEach(p => {
+          if (!p.geometry?.location || !p.name || !p.place_id) return;
+          const marker = new window.google.maps.Marker({
+            position: p.geometry.location,
+            map: mapRef.current,
+            title: p.name,
+            icon: { url: iconUrl, scaledSize: new google.maps.Size(32, 32) }
+          });
+          markersRef.current.push(marker);
+          marker.addListener('click', () => fetchAndShowPlaceDetails(p.place_id!));
+        });
+      }
+    });
+  }, [isLoaded, center, fetchAndShowPlaceDetails]);
+
+  // Effect for landmarks
+  useEffect(() => {
+    if (showLandmarks) {
+      searchAndDisplayPlaces('landmark', landmarkMarkersRef, '/landmark-marker.png');
+    } else {
+      clearMarkers(landmarkMarkersRef);
+    }
+  }, [showLandmarks, searchAndDisplayPlaces]);
+  
+  // Effect for restaurants
+  useEffect(() => {
+    if (showRestaurants) {
+      searchAndDisplayPlaces('restaurant', restaurantMarkersRef, '/restaurant-marker.png');
+    } else {
+      clearMarkers(restaurantMarkersRef);
+    }
+  }, [showRestaurants, searchAndDisplayPlaces]);
+
 
   useEffect(() => {
     if (selectedPlaceId) fetchAndShowPlaceDetails(selectedPlaceId);

@@ -1,10 +1,9 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { X, Star, Globe, Youtube } from "lucide-react"; // Added Youtube icon
+import { X, Star, Globe } from "lucide-react";
 import React from "react";
-
-// --- Define Data Structures ---
+import Image from "next/image";
 
 interface Review {
   author_name: string;
@@ -21,7 +20,6 @@ export interface RichPlaceDetails {
   editorial_summary?: { overview?: string };
 }
 
-// --- NEW: Interface for a single YouTube video ---
 export interface YouTubeVideo {
   id?: string;
   title?: string;
@@ -29,20 +27,18 @@ export interface YouTubeVideo {
   channelTitle?: string;
 }
 
-// --- UPDATED: Props now include video data and new states ---
 interface LocationMenuPopupProps {
   isOpen: boolean;
   onClose: () => void;
   place?: { name: string; address: string; photoUrl?: string };
   details?: RichPlaceDetails;
   youtubeVideos?: YouTubeVideo[];
-  isLoading: boolean; // For main details
-  isVideosLoading: boolean; // Separate loading state for videos
-  activeTab: "info" | "reviews" | "videos"; // Added "videos"
+  isLoading: boolean;
+  isVideosLoading: boolean;
+  activeTab: "info" | "reviews" | "videos";
   setActiveTab: (tab: "info" | "reviews" | "videos") => void;
 }
 
-// A simple component to render star ratings
 const StarRating = ({ rating }: { rating: number }) => (
   <div className="flex items-center">
     {[...Array(5)].map((_, i) => (
@@ -100,7 +96,6 @@ export default function LocationMenuPopup({
               </div>
             )}
 
-            {/* --- UPDATED: Tabs with new "Videos" option --- */}
             <div className="flex border-b border-white/30 mb-4">
               <button
                 className={`px-4 py-2 text-sm font-semibold transition rounded-t-md ${activeTab === "info" ? "bg-yellow-300 text-black" : "text-white/70 hover:text-white"}`}
@@ -118,13 +113,12 @@ export default function LocationMenuPopup({
               <button
                 className={`ml-2 px-4 py-2 text-sm font-semibold transition rounded-t-md ${activeTab === "videos" ? "bg-yellow-300 text-black" : "text-white/70 hover:text-white"}`}
                 onClick={() => setActiveTab("videos")}
-                disabled={isLoading} // Only disable while main details are loading
+                disabled={isLoading}
               >
                 Videos
               </button>
             </div>
 
-            {/* Main Content Area */}
             <div className="min-h-[200px] max-h-[50vh] overflow-y-auto pr-2">
               {isLoading ? (
                 <div className="flex justify-center items-center h-full">
@@ -134,7 +128,18 @@ export default function LocationMenuPopup({
                 <>
                   {activeTab === "info" && (
                     <div className="space-y-4">
-                      {place?.photoUrl && <img src={place.photoUrl} alt={place.name} className="w-full h-48 object-cover rounded-xl" />}
+                      {place?.photoUrl && (
+                        <div className="relative w-full h-48">
+                          <Image 
+                            src={place.photoUrl} 
+                            alt={place.name} 
+                            fill
+                            className="object-cover rounded-xl"
+                            sizes="(max-width: 768px) 100vw, 50vw"
+                            priority 
+                          />
+                        </div>
+                      )}
                       {details?.rating && <StarRating rating={details.rating} />}
                       {details?.editorial_summary?.overview && (
                         <div>
@@ -158,7 +163,15 @@ export default function LocationMenuPopup({
                         details.reviews.map((review, idx) => (
                           <li key={idx} className="bg-white/10 p-3 rounded-xl border border-white/20">
                             <div className="flex items-center mb-2">
-                              <img src={review.profile_photo_url} alt={review.author_name} className="w-10 h-10 rounded-full mr-3" />
+                              <div className="relative w-10 h-10 rounded-full mr-3 overflow-hidden">
+                                <Image 
+                                  src={review.profile_photo_url} 
+                                  alt={review.author_name} 
+                                  fill
+                                  sizes="40px"
+                                  className="object-cover"
+                                />
+                              </div>
                               <div>
                                 <p className="font-semibold">{review.author_name}</p>
                                 <StarRating rating={review.rating} />
@@ -174,7 +187,6 @@ export default function LocationMenuPopup({
                     </ul>
                   )}
 
-                  {/* --- NEW: Videos Tab Content --- */}
                   {activeTab === "videos" && (
                     <div>
                       {isVideosLoading ? (
@@ -192,7 +204,15 @@ export default function LocationMenuPopup({
                                   rel="noopener noreferrer"
                                   className="flex items-center bg-white/10 p-2 rounded-xl border border-transparent hover:border-yellow-400 transition-all group"
                                 >
-                                  <img src={video.thumbnail} alt={video.title} className="w-24 h-16 object-cover rounded-md mr-4" />
+                                  <div className="relative w-24 h-16 rounded-md mr-4 overflow-hidden flex-shrink-0">
+                                    <Image 
+                                      src={video.thumbnail!}
+                                      alt={video.title || "YouTube video thumbnail"} 
+                                      fill
+                                      sizes="96px"
+                                      className="object-cover"
+                                    />
+                                  </div>
                                   <div className="flex-1">
                                     <p className="font-semibold text-sm leading-tight group-hover:text-yellow-300 transition-colors">{video.title}</p>
                                     <p className="text-xs text-white/60 mt-1">{video.channelTitle}</p>
