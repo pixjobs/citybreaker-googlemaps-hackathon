@@ -162,7 +162,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
         gsap.set(slides, { opacity: 0 });
 
         const tl = gsap.timeline({ repeat: -1 });
-        slides.forEach(slide => { // Removed '_' as it's not used
+        slides.forEach(slide => {
           tl.to(slide, { opacity: 1, duration: 1 });
           tl.to(slide, { opacity: 0, duration: 1 }, "+=2");
         });
@@ -243,12 +243,14 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
               );
               const photos = matched.map(m => m.photoUrl).filter(Boolean);
               return (
-                <div key={i} ref={el => (contentRefs.current[i] = el)} className="space-y-3">
+                // --- FIX: Changed the ref callback to a block body ---
+                <div key={i} ref={el => { contentRefs.current[i] = el; }} className="space-y-3">
                   <h3 className="text-lg font-bold text-[#FFD600]">{day.title}</h3>
                   {photos.length > 0 && (
+                    // --- FIX: Changed the ref callback to a block body ---
                     <div
                       className="relative w-full h-48 overflow-hidden rounded-lg shadow border border-[#FFD600]"
-                      ref={el => (carouselRefs.current[i] = el)}
+                      ref={el => { carouselRefs.current[i] = el; }}
                     >
                       {photos.map((url, j) => (
                         <Image

@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import * as Icons from "lucide-react";
-import type { LucideProps } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
+// Module-level cache for pitch and icons
 const cityPitchCache: Record<string, { salesPitch?: string; icons?: string[] }> = {};
 
-// --- FIX: This is the complete City interface, matching the parent components ---
-// It now correctly includes all required properties.
 interface City {
   name: string;
   timezone: string;
@@ -18,15 +17,15 @@ interface City {
   icons?: string[];
 }
 
-type IconCollection = Record<string, React.ComponentType<LucideProps>>;
+interface SplitFlapBoardProps {
+  cities: City[];
+  onSelectCity: (city: City) => void;
+}
 
 export default function SplitFlapBoard({
   cities,
   onSelectCity,
-}: {
-  cities: City[];
-  onSelectCity: (city: City) => void;
-}) {
+}: SplitFlapBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const [cityTimes, setCityTimes] = useState<Record<string, string>>({});
   const [enrichedCities, setEnrichedCities] = useState<City[]>(cities);
@@ -36,45 +35,52 @@ export default function SplitFlapBoard({
     setMounted(true);
   }, []);
 
-  // Hydration-safe time updating
+  // Hydration-safe time updates
   useEffect(() => {
     if (!mounted) return;
+
     const updateTimes = () => {
-      const times: Record<string, string> = {};
-      cities.forEach(c => {
+      const updated: Record<string, string> = {};
+      cities.forEach(city => {
         try {
-          times[c.name] = new Intl.DateTimeFormat("en-GB", {
-            timeZone: c.timezone,
+          updated[city.name] = new Intl.DateTimeFormat("en-GB", {
+            timeZone: city.timezone,
             hour: "2-digit",
             minute: "2-digit",
           }).format(new Date());
         } catch {
-          times[c.name] = "--:--";
+          updated[city.name] = "--:--";
         }
       });
-      setCityTimes(times);
+      setCityTimes(updated);
     };
+
     updateTimes();
-    const intervalId = setInterval(updateTimes, 60000);
+    const intervalId = setInterval(updateTimes, 60000); // every minute
+
     return () => clearInterval(intervalId);
   }, [cities, mounted]);
 
-  // Fetch pitch and icons, using cache
+  // Fetch pitch and icons
   useEffect(() => {
     let isCancelled = false;
+
     (async () => {
-      const results: City[] = await Promise.all(
-        cities.map(async city => {
+      const results = await Promise.all(
+        cities.map(async (city) => {
           if (cityPitchCache[city.name]) {
             return { ...city, ...cityPitchCache[city.name] };
           }
+
           try {
             const res = await fetch("/api/city-pitch", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ city: city.name }),
             });
+
             if (!res.ok) throw new Error("Network error");
+
             const { pitch, icons } = await res.json();
             cityPitchCache[city.name] = { salesPitch: pitch, icons };
             return { ...city, salesPitch: pitch, icons };
@@ -84,19 +90,30 @@ export default function SplitFlapBoard({
           }
         })
       );
+
       if (!isCancelled) setEnrichedCities(results);
     })();
-    return () => { isCancelled = true; };
+
+    return () => {
+      isCancelled = true;
+    };
   }, [cities]);
 
-  // GSAP animation
+  // Animate city rows
   useEffect(() => {
     if (!mounted || !boardRef.current) return;
-    const letters = boardRef.current.querySelectorAll('.letter');
+
+    const letters = boardRef.current.querySelectorAll(".letter");
     gsap.fromTo(
       letters,
       { rotateX: 90, opacity: 0 },
-      { rotateX: 0, opacity: 1, duration: 0.3, ease: 'back.out(1.7)', stagger: 0.02 }
+      {
+        rotateX: 0,
+        opacity: 1,
+        duration: 0.3,
+        ease: "back.out(1.7)",
+        stagger: 0.02,
+      }
     );
   }, [mounted, enrichedCities]);
 
@@ -117,22 +134,24 @@ export default function SplitFlapBoard({
           className="grid grid-cols-3 px-4 py-2 hover:bg-yellow-500/10 cursor-pointer border-b border-yellow-700 transition-all items-center"
           onClick={() => onSelectCity(city)}
         >
-          <div className="letter text-yellow-200">{cityTimes[city.name] ?? '--:--'}</div>
+          <div className="letter text-yellow-200">{cityTimes[city.name] ?? "--:--"}</div>
           <div className="letter text-yellow-300 font-bold tracking-widest">
             {city.name.toUpperCase()}
           </div>
           <div className="flex justify-center space-x-2">
             {city.icons && city.icons.length > 0 ? (
-              city.icons.map(iconName => {
-                const IconComp = (Icons as IconCollection)[iconName];
+              city.icons.map((iconName) => {
+                const IconComp = Icons[iconName as keyof typeof Icons] as LucideIcon;
                 return IconComp ? (
-                  <IconComp
+                  <span
                     key={iconName}
-                    size={18}
-                    title={city.salesPitch}
                     className="text-yellow-200 hover:text-yellow-100"
-                    onClick={e => e.stopPropagation()}
-                  />
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <IconComp size={18}>
+                      {city.salesPitch && <title>{city.salesPitch}</title>}
+                    </IconComp>
+                  </span>
                 ) : null;
               })
             ) : (

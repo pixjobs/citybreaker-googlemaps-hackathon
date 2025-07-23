@@ -57,7 +57,6 @@ export default function CityMap({
   const restaurantMarkersRef = useRef<google.maps.Marker[]>([]);
   const highlightMarkerRef = useRef<google.maps.Marker | null>(null);
 
-  // --- FIX: Removed redundant `itinerary` state. ItineraryPanel handles its own state. ---
   const [placePhotos, setPlacePhotos] = useState<PlacePhotoInfo[]>([]);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [isDetailsLoading, setIsDetailsLoading] = useState(false);
@@ -66,7 +65,9 @@ export default function CityMap({
   const [selectedPlaceDetails, setSelectedPlaceDetails] = useState<RichPlaceDetails>();
   const [youtubeVideos, setYoutubeVideos] = useState<YouTubeVideo[]>([]);
   const [activeTab, setActiveTab] = useState<"info" | "reviews" | "videos">("info");
-  const [isLoading, setIsLoading] = useState(false);
+  
+  // --- FIX: Removed the unused `isLoading` state ---
+  // const [isLoading, setIsLoading] = useState(false);
 
   useAnimatedPanel(panelRef, isItineraryOpen);
 
@@ -103,7 +104,7 @@ export default function CityMap({
   
   useEffect(() => {
     if (!isLoaded || !window.google?.maps?.Map) return;
-    setIsLoading(true);
+    // --- FIX: Removed setIsLoading(true) ---
     setPlacePhotos([]);
     clearMarkers(attractionMarkersRef);
     clearMarkers(landmarkMarkersRef);
@@ -124,13 +125,12 @@ export default function CityMap({
         setPlacePhotos(photos.filter(p => p.name));
         onPlacesLoaded?.(photos.map(p => p.photoUrl!).filter(Boolean));
         results.forEach(p => { if (!p.geometry?.location || !p.name || !p.place_id) return; const marker = new window.google.maps.Marker({ position: p.geometry.location, map: mapRef.current!, title: p.name, icon: { url: "/marker.png", scaledSize: new google.maps.Size(40, 40) }, }); attractionMarkersRef.current.push(marker); marker.addListener("click", () => fetchAndShowPlaceDetails(p.place_id!)); });
-        // --- FIX: Removed the redundant Gemini fetch. ItineraryPanel does this itself. ---
       } else {
         console.error("NearbySearch for attractions failed:", status);
       }
-      setIsLoading(false); // End loading after search completes
+      // --- FIX: Removed setIsLoading(false) ---
     });
-  }, [isLoaded, center, tripLength, fetchAndShowPlaceDetails, onPlacesLoaded, clearMarkers]);
+  }, [isLoaded, center, onPlacesLoaded, clearMarkers, fetchAndShowPlaceDetails]);
   
   useEffect(() => { if (!mapRef.current) return; const isSat = mapRef.current.getMapTypeId() === 'satellite'; if (isSatelliteView && !isSat) mapRef.current.setMapTypeId('satellite'); else if (!isSatelliteView && isSat) { mapRef.current.setMapTypeId('roadmap'); mapRef.current.setOptions({ styles: retroDarkStyle }); } }, [isSatelliteView]);
 
@@ -153,7 +153,6 @@ export default function CityMap({
       <div id="map" className="absolute inset-0 z-0" />
       <LocationMenuPopup isOpen={isPopupOpen} onClose={() => setIsPopupOpen(false)} place={selectedPlaceBasic} details={selectedPlaceDetails} youtubeVideos={youtubeVideos} isLoading={isDetailsLoading} isVideosLoading={isVideosLoading} activeTab={activeTab} setActiveTab={setActiveTab}/>
       <div ref={panelRef} className="fixed inset-0 z-20 opacity-0 pointer-events-none" style={{ transform: "translateY(100%) translateX(100%)" }}>
-        {/* --- FIX: Pass the correct props to ItineraryPanel --- */}
         {isItineraryOpen && (
           <ItineraryPanel
             cityName={center.name}
