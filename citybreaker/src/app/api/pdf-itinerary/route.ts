@@ -1,200 +1,188 @@
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
-import { Storage } from '@google-cloud/storage';
-import fs from 'fs';
-import path from 'path';
+import puppeteer from 'puppeteer';
 
-// --- Configuration ---
-const GEMINI_SECRET = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
-const MAPS_SECRET = 'projects/934477100130/secrets/maps-api-key/versions/latest';
-const BUCKET_NAME = 'citybreaker-downloads';
-const GEMINI_MODEL = 'gemini-2.5-pro';
-const TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
-const DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
-const PHOTO_URL = 'https://maps.googleapis.com/maps/api/place/photo';
+// --- Config ---
+const GEMINI_SECRET_NAME = 'projects/934477100130/secrets/gemini-api-key/versions/latest';
+const MAPS_SECRET_NAME = 'projects/934477100130/secrets/maps-api-key/versions/latest';
+const MAPS_TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
+const MAPS_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
+const MAPS_PHOTO_BASE_URL = 'https://maps.googleapis.com/maps/api/place/photo';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
-// --- Caching & Clients ---
-const storage = new Storage();
-const smClient = new SecretManagerServiceClient();
-let geminiKey: string | null = null;
-let mapsKey: string | null = null;
-
-// --- Helper Functions ---
-async function getSecret(name: string): Promise<string> {
-  const [version] = await smClient.accessSecretVersion({ name });
-  return version.payload?.data?.toString() || '';
+// --- Types ---
+interface IncomingPlace { name: string }
+interface EnrichedPlace { name: string; photoUrl?: string }
+interface ItineraryDay {
+  title: string;
+  activities: string[];
+  dayPhoto?: string;
 }
 
-function createFilename(city: string, days: number): string {
-  return `${city.replace(/\s+/g, '_')}_${days}d_Itinerary.pdf`;
+// --- Caching ---
+let cachedGeminiKey: string | null = null;
+let cachedMapsKey: string | null = null;
+let cachedGeminiClient: GoogleGenerativeAI | null = null;
+let secretManagerClient: SecretManagerServiceClient | null = null;
+
+// --- Secret Access ---
+async function getSecretManagerClient(): Promise<SecretManagerServiceClient> {
+  if (!secretManagerClient) secretManagerClient = new SecretManagerServiceClient();
+  return secretManagerClient;
 }
 
-// --- Data Enrichment ---
-async function enrichPlacesWithPhotos(places: { name: string }[], apiKey: string): Promise<{ name: string; photoUrl?: string }[]> {
-  return Promise.all(
-    places.map(async ({ name }) => {
-      if (!name) return { name: 'Unnamed Place' };
-      try {
-        const searchRes = await fetch(`${TEXT_SEARCH_URL}?query=${encodeURIComponent(name)}&key=${apiKey}`);
-        const searchData = await searchRes.json();
-        const placeId = searchData?.results?.[0]?.place_id;
-        if (!placeId) return { name };
-        const detailsRes = await fetch(`${DETAILS_URL}?place_id=${placeId}&fields=photos&key=${apiKey}`);
-        const detailsData = await detailsRes.json();
-        const ref = detailsData?.result?.photos?.[0]?.photo_reference;
-        const photoUrl = ref ? `${PHOTO_URL}?maxwidth=800&photo_reference=${ref}&key=${apiKey}` : undefined;
-        return { name, photoUrl };
-      } catch (error) {
-        console.error(`Failed to enrich place: ${name}`, error);
-        return { name };
-      }
-    })
-  );
+async function getSecret(secretName: string): Promise<string | null> {
+  try {
+    const sm = await getSecretManagerClient();
+    const [version] = await sm.accessSecretVersion({ name: secretName });
+    return version.payload?.data?.toString() ?? null;
+  } catch (error) {
+    console.error(`Error accessing secret: ${secretName}`, error);
+    return null;
+  }
 }
 
-// --- Itinerary Generation ---
-async function generateMarkdown(places: { name: string }[], days: number, city: string): Promise<string> {
-  if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
-  const client = new GoogleGenerativeAI(geminiKey);
-  const model = client.getGenerativeModel({ model: GEMINI_MODEL });
-  const prompt = `
-    Create a detailed, engaging, and well-structured ${days}-day markdown itinerary for a trip to ${city}.
-    For each day, provide a clear heading starting with '### Day N: [Creative Title]'.
-    Within each day, create a list of 2-4 activities.
-    For each activity, provide a short, enticing description (1-2 sentences).
-    Make sure to naturally incorporate the following places into the itinerary:
-    ${places.map(p => `- ${p.name}`).join('\n')}
-    The tone should be exciting and inspiring. Ensure the output is valid markdown.
-    `;
-  const result = await model.generateContent(prompt);
-  return result.response.text();
-}
+// --- Place Enrichment ---
+async function enrichPlacesWithPhotos(places: IncomingPlace[], apiKey: string | null): Promise<EnrichedPlace[]> {
+  if (!apiKey) return places.map(p => ({ name: p.name }));
 
-// --- HTML Builder ---
-function buildHtml(markdown: string, city: string): string {
-    const logoPath = path.join(process.cwd(), 'public', 'logo', 'citybreaker.png');
-    let logoBase64 = '';
+  return Promise.all(places.map(async ({ name }) => {
+    if (!name) return { name: 'Unnamed Place' };
     try {
-        const logoBuffer = fs.readFileSync(logoPath);
-        logoBase64 = `data:image/png;base64,${logoBuffer.toString('base64')}`;
-    } catch {
-        console.error("Logo file not found. PDF will be generated without a logo.");
+      const searchRes = await fetch(`${MAPS_TEXT_SEARCH_URL}?query=${encodeURIComponent(name)}&key=${apiKey}`);
+      const searchData = await searchRes.json();
+      const placeId = searchData.results?.[0]?.place_id;
+      if (!placeId) return { name };
+
+      const detailsRes = await fetch(`${MAPS_DETAILS_URL}?place_id=${placeId}&fields=photos&key=${apiKey}`);
+      const detailsData = await detailsRes.json();
+      const ref = detailsData.result?.photos?.[0]?.photo_reference;
+      const photoUrl = ref ? `${MAPS_PHOTO_BASE_URL}?maxwidth=800&photo_reference=${ref}&key=${apiKey}` : undefined;
+
+      return { name, photoUrl };
+    } catch (err) {
+      console.error(`Error enriching place "${name}"`, err);
+      return { name };
     }
-    const dayBlocks = markdown.split('###').slice(1);
-    let contentHtml = '';
-    dayBlocks.forEach((block, index) => {
-        const lines = block.trim().split('\n');
-        const heading = lines.shift()?.trim() || `Day ${index + 1}`;
-        const activities = lines
-            .map(line => line.replace(/^[-*]\s*/, '').trim())
-            .filter(Boolean)
-            .map(line => {
-                const parts = line.split('**');
-                return parts.length > 2 ? `<li><strong>${parts[1]}</strong>: ${parts[2].trim()}</li>` : `<li>${line}</li>`;
-            })
-            .join('');
-        contentHtml += `
-            <div class="day-section">
-                <div class="day-number">Day ${index + 1}</div>
-                <h2 class="day-title">${heading.replace(/^Day \d+:\s*/, '')}</h2>
-                <ul class="itinerary-list">${activities}</ul>
-            </div>
-        `;
-    });
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8"><title>${city} Itinerary</title>
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&family=Roboto+Slab:wght@700&display=swap');
-            body { font-family: 'Roboto', sans-serif; margin: 0; color: #333; background-color: #fff; -webkit-print-color-adjust: exact; }
-            .page { padding: 40px; box-sizing: border-box; page-break-after: always; position: relative; min-height: 29.7cm; }
-            .page:last-child { page-break-after: auto; }
-            .header { display: flex; align-items: center; padding-bottom: 20px; border-bottom: 2px solid #e0e0e0; }
-            .logo { width: 50px; height: 50px; margin-right: 20px; }
-            .main-title { font-family: 'Roboto Slab', serif; font-size: 28px; font-weight: 700; color: #1a1a1a; }
-            .main-title span { font-size: 20px; font-weight: 400; color: #666; }
-            .day-section { margin-top: 30px; border: 1px solid #eee; border-radius: 8px; padding: 20px; background-color: #f9f9f9; }
-            .day-number { font-family: 'Roboto Slab', serif; font-size: 14px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-            .day-title { font-family: 'Roboto Slab', serif; font-size: 22px; color: #333; margin: 5px 0 15px 0; }
-            .itinerary-list { padding-left: 20px; list-style-type: '✔ '; }
-            .itinerary-list li { margin-bottom: 12px; line-height: 1.6; }
-            .itinerary-list li strong { color: #1a1a1a; }
-            .footer { position: absolute; bottom: 20px; left: 40px; right: 40px; text-align: center; font-size: 10px; color: #aaa; }
-        </style>
-    </head>
-    <body>
-        <div class="page">
-            <div class="header">
-                ${logoBase64 ? `<img src="${logoBase64}" class="logo">` : ''}
-                <h1 class="main-title">${city} <br><span>Your Personal Itinerary</span></h1>
-            </div>
-            ${contentHtml}
-            <div class="footer">Generated by CityBreaker</div>
-        </div>
-    </body>
-    </html>`;
+  }));
 }
 
-// --- PDF Generation ---
+// --- Markdown Parsing ---
+function parseItineraryMarkdown(markdown: string, enriched: EnrichedPlace[]): ItineraryDay[] {
+  return markdown.split('###').slice(1).map(block => {
+    const lines = block.trim().split('\n');
+    const heading = lines.shift() ?? '';
+    const photoMatch = heading.match(/\[PHOTO_SUGGESTION:\s*"([^"]+)"\]/i);
+    const title = heading.replace(/\[PHOTO_SUGGESTION:[^\]]+\]/i, '').trim();
+    const photoName = photoMatch?.[1]?.toLowerCase();
+    const dayPhoto = enriched.find(p => p.name.toLowerCase() === photoName)?.photoUrl;
+
+    const activities = lines.map(line => line.replace(/^[-*]\s*/, '').trim()).filter(Boolean);
+    return { title, activities, dayPhoto };
+  });
+}
+
+// --- Gemini Generation ---
+async function generateItineraryMarkdown(geminiKey: string, places: EnrichedPlace[], days: number, city: string): Promise<string> {
+  if (!cachedGeminiClient) cachedGeminiClient = new GoogleGenerativeAI(geminiKey);
+  const model = cachedGeminiClient.getGenerativeModel({ model: GEMINI_MODEL });
+
+  const placeList = places.map(p => `- ${p.name}`).join('\n');
+  const prompt = `Generate a ${days}-day Markdown itinerary for ${city}.
+Each day starts with: ### Day N: Title [PHOTO_SUGGESTION: "Place Name"]
+Use 2–4 of the following places:\n${placeList}
+Respond in valid Markdown.`;
+
+  const result = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.7 },
+  });
+
+  const markdown = await result.response.text();
+  if (!markdown) throw new Error("Empty response from Gemini.");
+  return markdown;
+}
+
+// --- HTML to PDF ---
+function buildHtml(itinerary: ItineraryDay[], city: string): string {
+  return `
+    <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 40px; background: white; }
+          h1 { font-size: 28px; margin-bottom: 20px; }
+          h2 { font-size: 22px; margin-top: 30px; }
+          ul { padding-left: 20px; }
+          img { margin: 10px 0; max-width: 100%; height: auto; border-radius: 6px; }
+          .day { page-break-after: always; }
+          .day:last-child { page-break-after: auto; }
+        </style>
+      </head>
+      <body>
+        <h1>${city} Travel Itinerary</h1>
+        ${itinerary.map((day, i) => `
+          <div class="day">
+            <h2>Day ${i + 1}: ${day.title}</h2>
+            ${day.dayPhoto ? `<img src="${day.dayPhoto}" alt="Photo for ${day.title}" />` : ''}
+            <ul>${day.activities.map(act => `<li>${act}</li>`).join('')}</ul>
+          </div>
+        `).join('')}
+      </body>
+    </html>
+  `;
+}
+
 async function generatePdf(html: string): Promise<Buffer> {
-    const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdfData = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' }
-    });
-    await browser.close();
-    // --- FIX: Explicitly convert the Uint8Array from puppeteer to a Node.js Buffer ---
-    // This satisfies the function's return type `Promise<Buffer>` and resolves the error.
-    return Buffer.from(pdfData);
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+  const page = await browser.newPage();
+  await page.setContent(html, { waitUntil: 'networkidle0' });
+  const pdf = await page.pdf({ format: 'A4', printBackground: true });
+  await browser.close();
+  return pdf;
 }
 
 // --- Route Handler ---
 export async function POST(req: NextRequest) {
   try {
-    const { places = [], tripLength = 3, cityName = 'CityBreaker', sessionId } = await req.json();
-    if (!Array.isArray(places) || !places.length) {
-      return NextResponse.json({ error: 'Missing places' }, { status: 400 });
+    const { places = [], tripLength = 3, cityName = 'CityBreaker' } = await req.json();
+
+    if (!Array.isArray(places) || places.length === 0) {
+      return NextResponse.json({ error: 'Missing or empty places array' }, { status: 400 });
     }
+
     const city = cityName.trim();
     const days = Math.min(Math.max(tripLength, 1), 7);
 
-    if (!mapsKey) mapsKey = await getSecret(MAPS_SECRET);
-    const enriched = await enrichPlacesWithPhotos(places, mapsKey);
-    const markdown = await generateMarkdown(enriched, days, city);
-    const html = buildHtml(markdown, city);
-    const pdf = await generatePdf(html);
-    const filename = createFilename(city, days);
+    const geminiKey = cachedGeminiKey || await getSecret(GEMINI_SECRET_NAME);
+    const mapsKey = cachedMapsKey || await getSecret(MAPS_SECRET_NAME);
+    if (!geminiKey) return NextResponse.json({ error: 'Missing Gemini API key' }, { status: 500 });
 
-    if (sessionId) {
-      const file = storage.bucket(BUCKET_NAME).file(`sessions/${sessionId}/${filename}`);
-      await file.save(pdf, { contentType: 'application/pdf' });
-      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
-      return NextResponse.json({ url });
-    } else {
-      return new NextResponse(pdf, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="${filename}"`
-        }
-      });
-    }
+    cachedGeminiKey = geminiKey;
+    cachedMapsKey = mapsKey;
+
+    const enriched = await enrichPlacesWithPhotos(places, mapsKey);
+    const markdown = await generateItineraryMarkdown(geminiKey, enriched, days, city);
+    const itinerary = parseItineraryMarkdown(markdown, enriched);
+    const html = buildHtml(itinerary, city);
+    const pdf = await generatePdf(html);
+
+    return new NextResponse(pdf, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${city.replace(/\s+/g, '_')}_itinerary.pdf"`
+      }
+    });
 
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error occurred.';
-    console.error('PDF route error:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error('PDF itinerary error:', error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
