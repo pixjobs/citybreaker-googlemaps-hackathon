@@ -7,7 +7,7 @@ import CityMap from "@/components/CityMap";
 import ProgressBar from "@/components/ProgressBar";
 import SplitFlap from "@/components/SplitFlap";
 import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard";
-import SurpriseMe from "@/components/SurpriseMe"; // This import is correct
+import SurpriseMe from "@/components/SurpriseMe";
 import type { RichWelcomeData } from "@/types";
 
 interface City {
@@ -22,6 +22,7 @@ export default function HomePage() {
     { name: "London", timezone: "Europe/London", lat: 51.5074, lng: -0.1278 },
     { name: "Paris", timezone: "Europe/Paris", lat: 48.8566, lng: 2.3522 },
     { name: "Berlin", timezone: "Europe/Berlin", lat: 52.52, lng: 13.405 },
+    { name: "Mannheim", timezone: "Europe/Berlin", lat: 49.4875, lng: 8.4660 },
     { name: "Prague", timezone: "Europe/Prague", lat: 50.0755, lng: 14.4378 },
     { name: "Dubai", timezone: "Asia/Dubai", lat: 25.2048, lng: 55.2708 },
     { name: "Beijing", timezone: "Asia/Shanghai", lat: 39.9042, lng: 116.4074 },
@@ -32,14 +33,21 @@ export default function HomePage() {
   ];
 
   const countryColors: Record<string, string> = {
-    London: "#ff0000", Paris: "#0055A4", Berlin: "#000000", Prague: "#D7141A",
-    Dubai: "#FFC300", Beijing: "#ffde00", Tokyo: "#bc002d", Seoul: "#003478",
-    "New York": "#3c3b6e", "San Francisco": "#b22222",
+    London: "#ff0000",
+    Paris: "#0055A4",
+    Berlin: "#000000",
+    Mannheim: "#e2001a",
+    Prague: "#D7141A",
+    Dubai: "#FFC300",
+    Beijing: "#ffde00",
+    Tokyo: "#bc002d",
+    Seoul: "#003478",
+    "New York": "#3c3b6e",
+    "San Francisco": "#b22222",
   };
 
   const [selectedCity, setSelectedCity] = useState<City>(cities[0]);
   const [placePhotos, setPlacePhotos] = useState<string[]>([]);
-  const [searchedPlaceId, setSearchedPlaceId] = useState<string | null>(null);
   const [isItineraryOpen, setIsItineraryOpen] = useState(false);
   const [isSurpriseMeOpen, setIsSurpriseMeOpen] = useState(false);
   const [richData, setRichData] = useState<RichWelcomeData | null>(null);
@@ -50,19 +58,37 @@ export default function HomePage() {
   const [isSatelliteView, setIsSatelliteView] = useState(false);
   const [showLandmarks, setShowLandmarks] = useState(false);
   const [showRestaurants, setShowRestaurants] = useState(false);
-
-  // --- EXTENSION 1: Add new state to override the map's center ---
   const [mapCenterOverride, setMapCenterOverride] = useState<{lat: number, lng: number} | null>(null);
+  const [cityTime, setCityTime] = useState("--:--");
 
-  // --- EXTENSION 2: Update the `center` memo to prioritize the override ---
   const center = useMemo(
     () => (mapCenterOverride
-      ? { ...mapCenterOverride, zoom: 16, name: 'Suggestion' } // Use override with higher zoom
-      : { lat: selectedCity.lat, lng: selectedCity.lng, zoom: 14, name: selectedCity.name }), // Default to selected city
+      ? { ...mapCenterOverride, zoom: 19, name: 'Suggestion' } 
+      : { lat: selectedCity.lat, lng: selectedCity.lng, zoom: 14, name: selectedCity.name }),
     [selectedCity, mapCenterOverride]
   );
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const updateCityTime = () => {
+      try {
+        const time = new Intl.DateTimeFormat('en-GB', {
+          timeZone: selectedCity.timezone,
+          hour: '2-digit',
+          minute: '2-digit'
+        }).format(new Date());
+        setCityTime(time);
+      } catch {
+        setCityTime("--:--");
+      }
+    };
+    updateCityTime();
+    const intervalId = setInterval(updateCityTime, 60000);
+    return () => clearInterval(intervalId);
+  }, [selectedCity]);
   
   useEffect(() => {
     async function fetchRich() { try { const res = await fetch('/api/travel-tips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ destination: selectedCity.name }), }); if (!res.ok) throw new Error(); setRichData(await res.json()); } catch { setRichData({ intro: `Welcome to ${selectedCity.name}!`, vibeKeywords: [], mustDo: '', hiddenGem: '', foodieTip: '' }); } }
@@ -80,21 +106,27 @@ export default function HomePage() {
     const banner = bannerRef.current!;
     const tl = gsap.timeline({ defaults: { ease: 'power2.out' } });
     tl.fromTo(banner, { y: -30, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.4 }).to({}, { duration: 10 }).to(banner, { y: 30, autoAlpha: 0, duration: 0.4 });
-    return () => tl.kill();
+    return () => {
+      tl.kill();
+    };
   }, [mounted, richData]);
 
   const handleSelectCity = useCallback((city: City) => {
     setPlacePhotos([]);
-    setSearchedPlaceId(null);
     setSelectedCity(city);
     setShowLandmarks(false);
     setShowRestaurants(false);
-    // --- EXTENSION 3: Clear the map override when selecting a new city ---
     setMapCenterOverride(null);
   }, []);
 
   const handlePlacesLoaded = useCallback((photos: string[]) => setPlacePhotos(photos.slice(0, 5)), []);
-  const handlePlaceSelect = useCallback((id: string) => setSearchedPlaceId(id), []);
+
+  const handlePlaceNavigate = useCallback((location: google.maps.LatLng) => {
+    setMapCenterOverride({
+      lat: location.lat(),
+      lng: location.lng(),
+    });
+  }, []);
 
   const handleMenuAction = useCallback((action: string) => {
     switch (action) {
@@ -106,32 +138,36 @@ export default function HomePage() {
     }
   }, []);
 
-  // --- EXTENSION 4: Create the handler to receive the zoom request from the child ---
   const handleZoomToLocation = useCallback((location: { lat: number, lng: number }) => {
     setMapCenterOverride(location);
   }, []);
 
-  const getCityTime = (tz: string) => { try { return new Intl.DateTimeFormat('en-GB',{timeZone:tz,hour:'2-digit',minute:'2-digit'}).format(new Date()); } catch { return '--:--'; } };
-
   return (
     <div className="relative w-full h-screen overflow-hidden">
       <CityMap 
-        center={center} // This now correctly uses the dynamic center
+        center={center}
         onPlacesLoaded={handlePlacesLoaded} 
-        selectedPlaceId={searchedPlaceId}
         isItineraryOpen={isItineraryOpen} 
         onCloseItinerary={() => setIsItineraryOpen(false)}
         isSatelliteView={isSatelliteView}
         showLandmarks={showLandmarks}
         showRestaurants={showRestaurants}
+        highlightedLocation={mapCenterOverride}
       />
-
+      
       {mounted && richData && (
         <div ref={bannerRef} className="absolute inset-0 flex items-center justify-center z-50 p-4 sm:p-0 pointer-events-none">
           <div className="relative w-full max-w-md bg-gradient-to-t from-black/90 to-black/60 backdrop-blur-md rounded-xl overflow-hidden">
             {placePhotos[currentSlide] && (
               <div className="relative w-full h-48">
-                <Image src={placePhotos[currentSlide]} alt="slide" fill className="object-cover" sizes="(max-width: 768px) 100vw, 600px" priority/>
+                <Image
+                  src={placePhotos[currentSlide]}
+                  alt="slide"
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 768px) 100vw, 600px"
+                  priority
+                />
               </div>
             )}
             <div className="p-4 text-yellow-200">
@@ -153,13 +189,13 @@ export default function HomePage() {
         cities={cities} 
         onSelectCity={handleSelectCity}
         onMenuAction={handleMenuAction} 
-        onPlaceSelect={handlePlaceSelect}
+        onPlaceNavigate={handlePlaceNavigate}
+        mapCenter={{ lat: selectedCity.lat, lng: selectedCity.lng }}
         isSatelliteView={isSatelliteView}
         showLandmarks={showLandmarks}
         showRestaurants={showRestaurants}
       />
       
-      {/* --- EXTENSION 5: Pass the handler down as a prop --- */}
       <SurpriseMe 
         isOpen={isSurpriseMeOpen}
         onClose={() => setIsSurpriseMeOpen(false)}
@@ -168,9 +204,10 @@ export default function HomePage() {
       />
       
       <ProgressBar />
+      
       <div className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow" style={{ border:'2px solid white', color:countryColors[selectedCity.name] }}>
         <div className="flex items-center gap-2"><SplitFlap text={selectedCity.name} /></div>
-        <span className="text-xs mt-1 text-white">{getCityTime(selectedCity.timezone)}</span>
+        <span className="text-xs mt-1 text-white">{cityTime}</span>
       </div>
     </div>
   );

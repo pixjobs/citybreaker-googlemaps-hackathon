@@ -4,8 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 
-const GEMINI_SECRET_NAME = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
-const MAPS_SECRET_NAME = 'projects/845341257082/secrets/maps-api-key/versions/latest';
+const GEMINI_SECRET_NAME = 'projects/934477100130/secrets/gemini-api-key/versions/latest';
+const MAPS_SECRET_NAME = 'projects/934477100130/secrets/maps-api-key/versions/latest';
 const MAPS_TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const MAPS_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 const MAPS_PHOTO_BASE_URL = 'https://maps.googleapis.com/maps/api/place/photo';

@@ -12,16 +12,29 @@ interface GeminiCityPitch {
   icons: string[];
 }
 
+// --- FIX: A more robust and readable type guard function ---
 function isValidGeminiResponse(data: unknown): data is GeminiCityPitch {
-  return (
-    typeof data === "object" &&
-    data !== null &&
-    "pitch" in data &&
-    typeof (data as Record<string, unknown>).pitch === "string" &&
-    "icons" in data &&
-    Array.isArray((data as Record<string, unknown>).icons) &&
-    (data as Record<string, unknown>).icons.every((i) => typeof i === "string")
-  );
+  // 1. Ensure it's a non-null object
+  if (typeof data !== 'object' || data === null) {
+    return false;
+  }
+
+  // 2. Cast to a record to safely check properties
+  const obj = data as Record<string, unknown>;
+
+  // 3. Check for the 'pitch' property and its type
+  const hasPitch = typeof obj.pitch === 'string';
+  
+  // 4. Check for the 'icons' property and its type (an array)
+  const hasIcons = Array.isArray(obj.icons);
+
+  if (!hasPitch || !hasIcons) {
+    return false;
+  }
+
+  // 5. If 'icons' is an array, check if all its elements are strings.
+  // This is now safe because we've confirmed `obj.icons` is an array.
+  return (obj.icons as unknown[]).every((item) => typeof item === 'string');
 }
 
 async function getGeminiApiKeyFromSecretManager(): Promise<string> {
@@ -67,31 +80,40 @@ Respond with only the JSON.`;
 
     const result = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8 },
+      // --- IMPROVEMENT: Explicitly request JSON to make the response more reliable ---
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.8
+      },
     });
 
-    let raw = result.response.text().trim();
-
-    if (raw.startsWith("```")) {
-      raw = raw.replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
-    }
-
+    const rawText = result.response.text();
     let data: unknown;
+
     try {
-      data = JSON.parse(raw);
+      data = JSON.parse(rawText);
     } catch (err) {
-      console.error("Parse error", err, raw);
-      return NextResponse.json({ message: "Malformed JSON from Gemini" }, { status: 500 });
+      console.error("Failed to parse Gemini JSON response:", rawText, err);
+      // Fallback: try to clean up markdown just in case
+      const cleanedText = rawText.replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
+      try {
+        data = JSON.parse(cleanedText);
+      } catch (finalErr) {
+        console.error("Final parse attempt failed:", cleanedText, finalErr);
+        return NextResponse.json({ message: "Malformed JSON from Gemini after cleanup" }, { status: 500 });
+      }
     }
 
     if (!isValidGeminiResponse(data)) {
+      console.error("Invalid structure from Gemini:", data);
       return NextResponse.json({ message: "Invalid structure returned from Gemini." }, { status: 500 });
     }
 
     return NextResponse.json({ pitch: data.pitch, icons: data.icons }, { status: 200 });
 
   } catch (error) {
-    console.error("Gemini generation failed:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("Gemini generation failed:", message);
     return NextResponse.json({ message: "Gemini generation failed." }, { status: 500 });
   }
 }

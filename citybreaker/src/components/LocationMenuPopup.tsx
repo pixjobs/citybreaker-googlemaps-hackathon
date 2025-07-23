@@ -5,7 +5,8 @@ import { X, Star, Globe } from "lucide-react";
 import React from "react";
 import Image from "next/image";
 
-interface Review {
+// --- FIX: Added the 'export' keyword to make this interface importable ---
+export interface Review {
   author_name: string;
   rating: number;
   relative_time_description: string;

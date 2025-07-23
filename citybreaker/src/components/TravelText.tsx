@@ -57,8 +57,11 @@ export default function TravelText({
   const [richData, setRichData] = useState<RichWelcomeData | null>(null);
   const masterTimelineRef = useRef<gsap.core.Timeline | null>(null);
 
+  // --- IMPROVEMENT: Declared once to be used in both effects and render ---
+  const isAppIntro = destination.startsWith("CityBreaker");
+
   useEffect(() => {
-    if (active && destination && !destination.startsWith("CityBreaker")) {
+    if (active && destination && !isAppIntro) { // Use the variable here
       setScene('loading');
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
@@ -93,31 +96,39 @@ export default function TravelText({
     } else if (active) {
       setScene('intro');
     }
-  }, [active, destination, onComplete]);
+  }, [active, destination, isAppIntro]); // isAppIntro is now a dependency
 
   useEffect(() => {
     masterTimelineRef.current?.kill();
 
     if (scene === 'intro') {
-      const isAppIntro = destination.startsWith("CityBreaker");
       const introTl = gsap.timeline({
-        onComplete: () => setScene('finished')
+        onComplete: () => {
+          // --- IMPROVEMENT: Directly call onComplete here ---
+          // This ensures the parent knows the animation is done.
+          onComplete(); 
+          setScene('finished');
+        }
       });
       introTl.fromTo("#intro-text",
         { autoAlpha: 0, scale: 0.95, y: 16 },
         { autoAlpha: 1, scale: 1, y: 0, duration: 1.2, ease: "expo.out" })
-        .to("#intro-text", { duration: 12.5 })
+        // --- IMPROVEMENT: Use different durations for app intro vs city intro ---
+        .to("#intro-text", { duration: isAppIntro ? 4 : 12.5 }) // Shorter pause for the app intro
         .to("#intro-text", { autoAlpha: 0, scale: 1.05, y: -10, duration: 1.5, ease: "expo.inOut" });
+      
       masterTimelineRef.current = introTl;
     }
-  }, [scene, destination]);
+  }, [scene, destination, isAppIntro, onComplete]); // Added dependencies
 
   if (scene === 'initial' || scene === 'finished') return null;
-  const isAppIntro = destination.startsWith("CityBreaker");
+  // The second declaration of isAppIntro is now removed.
 
   return (
     <div id="travel-text-container" className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none font-['Press_Start_2P']">
+      {/* --- FIX: Uncommented this line to use the `isAppIntro` variable --- */}
       {!isAppIntro && <BackgroundSlideshow imageUrls={imageUrls} />}
+      
       <div className="relative bg-[#0c0c1c]/90 text-green-400 font-mono text-center p-5 rounded-sm border border-pink-500 w-11/12 max-w-sm backdrop-blur-md min-h-[120px] flex items-center justify-center shadow-[0_0_8px_#ff00cc]">
         <h2 id="intro-text" className="text-[10px] sm:text-sm md:text-base leading-snug invisible tracking-tight text-shadow-[0_0_3px_#39ff14]">
           {richData?.intro || destination}

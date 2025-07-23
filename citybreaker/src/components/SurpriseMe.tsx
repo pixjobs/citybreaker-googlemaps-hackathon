@@ -1,5 +1,3 @@
-// components/SurpriseMe.tsx
-
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -8,10 +6,9 @@ import Image from 'next/image';
 import {
   FaTimes, FaDice, FaUtensils, FaTheaterMasks, FaRedo,
   FaSpinner, FaStar, FaMapSigns, FaGlobe, FaBookOpen,
-  FaMapMarkerAlt // <-- New Icon
+  FaMapMarkerAlt
 } from 'react-icons/fa';
 
-// --- MODIFICATION: Update the Suggestion interface to include location ---
 interface Suggestion {
   name: string;
   photoUrl: string;
@@ -22,11 +19,10 @@ interface Suggestion {
   rating?: number;
   website?: string;
   tripAdvisorUrl: string;
-  lat: number; // For zooming
-  lng: number; // For zooming
+  lat: number;
+  lng: number;
 }
 
-// --- MODIFICATION: Update the Props to accept a zoom handler ---
 interface SurpriseMeProps {
   isOpen: boolean;
   onClose: () => void;
@@ -47,7 +43,6 @@ export default function SurpriseMe({ isOpen, onClose, city, onZoomToLocation }: 
   const tabIndicatorRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // API call remains the same; it will just receive the new lat/lng data from the backend
   const fetchSuggestions = useCallback(async (prompt: 'hungry' | 'entertain' | 'surprise') => {
     setViewState('loading');
     setError(null);
@@ -67,29 +62,25 @@ export default function SurpriseMe({ isOpen, onClose, city, onZoomToLocation }: 
       setSuggestions(data);
       setActiveTabIndex(0);
       setViewState('result');
-    } catch (err: any) {
-      setError(err.message || 'An unknown error occurred.');
+    } catch (err: unknown) { // --- FIX: Changed `any` to `unknown` ---
+      // This is a type guard. It safely checks if `err` is an Error object.
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unexpected error occurred.');
+      }
       setViewState('prompts');
     }
   }, [city]);
 
-  // All animation useEffects remain the same...
+  // All animation useEffects and handlers remain unchanged.
   useEffect(() => { gsap.to(panelRef.current, { autoAlpha: isOpen ? 1 : 0, duration: 0.4, ease: 'power2.out', onComplete: () => { if (!isOpen) { setViewState('prompts'); setSuggestions(null); } } }); }, [isOpen]);
   useEffect(() => { if (viewState === 'result' && suggestions) { gsap.fromTo(resultContainerRef.current, {autoAlpha: 0}, {autoAlpha: 1, duration: 0.5}); const activeTab = tabRefs.current[activeTabIndex]; if (activeTab) gsap.to(tabIndicatorRef.current, { x: activeTab.offsetLeft, width: activeTab.offsetWidth, duration: 0.4, ease: 'power2.inOut' }); } }, [viewState, suggestions, activeTabIndex]);
-  
   const handlePromptClick = (prompt: 'hungry' | 'entertain' | 'surprise') => { gsap.to(promptContainerRef.current, { y: -20, autoAlpha: 0, duration: 0.4, ease: 'power2.in', onComplete: () => { gsap.set(promptContainerRef.current, { y: 0, autoAlpha: 1 }); fetchSuggestions(prompt); }, }); };
   const handleTabClick = (index: number) => { if (index === activeTabIndex) return; const tl = gsap.timeline({ onComplete: () => setActiveTabIndex(index) }); tl.to(contentRef.current, { autoAlpha: 0, y: 10, duration: 0.2, ease: 'power2.in' }); };
   useEffect(() => { if(viewState === 'result') { gsap.fromTo(contentRef.current, { autoAlpha: 0, y: -10 }, { autoAlpha: 1, y: 0, duration: 0.2, ease: 'power2.out', delay: 0.05 }); } }, [activeTabIndex, viewState]);
-
   const handleTryAgain = () => { setViewState('prompts'); setSuggestions(null); };
-  
-  // --- MODIFICATION: Add a handler for the new button ---
-  const handleZoomClick = () => {
-    if (!currentSuggestion) return;
-    onZoomToLocation({ lat: currentSuggestion.lat, lng: currentSuggestion.lng });
-    onClose(); // Close the modal to see the map
-  };
-
+  const handleZoomClick = () => { if (!currentSuggestion) return; onZoomToLocation({ lat: currentSuggestion.lat, lng: currentSuggestion.lng }); onClose(); };
   const currentSuggestion = suggestions?.[activeTabIndex];
 
   return (
@@ -123,7 +114,6 @@ export default function SurpriseMe({ isOpen, onClose, city, onZoomToLocation }: 
             </div>
             
             <div className="p-4 border-t border-yellow-500/20">
-              {/* --- MODIFICATION: Added "View on Map" button --- */}
               <div className="flex items-center gap-2 sm:gap-4 mb-4">
                   <button onClick={handleZoomClick} className="link-button"><FaMapMarkerAlt/><span>View on Map</span></button>
                   {currentSuggestion?.website && ( <a href={currentSuggestion.website} target="_blank" rel="noopener noreferrer" className="link-button"><FaGlobe/><span>Official Site</span></a> )}

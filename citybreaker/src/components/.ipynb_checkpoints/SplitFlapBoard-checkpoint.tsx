@@ -3,16 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import * as Icons from "lucide-react";
+import type { LucideProps } from "lucide-react";
 
-// Module-level cache to avoid redundant network calls
 const cityPitchCache: Record<string, { salesPitch?: string; icons?: string[] }> = {};
 
+// --- FIX: This is the complete City interface, matching the parent components ---
+// It now correctly includes all required properties.
 interface City {
   name: string;
   timezone: string;
+  lat: number;
+  lng: number;
   salesPitch?: string;
   icons?: string[];
 }
+
+type IconCollection = Record<string, React.ComponentType<LucideProps>>;
 
 export default function SplitFlapBoard({
   cities,
@@ -26,14 +32,14 @@ export default function SplitFlapBoard({
   const [enrichedCities, setEnrichedCities] = useState<City[]>(cities);
   const [mounted, setMounted] = useState(false);
 
-  // Mark client-side mount
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Update times every minute
+  // Hydration-safe time updating
   useEffect(() => {
-    const update = () => {
+    if (!mounted) return;
+    const updateTimes = () => {
       const times: Record<string, string> = {};
       cities.forEach(c => {
         try {
@@ -48,18 +54,17 @@ export default function SplitFlapBoard({
       });
       setCityTimes(times);
     };
-    update();
-    const id = setInterval(update, 60000);
-    return () => clearInterval(id);
-  }, [cities]);
+    updateTimes();
+    const intervalId = setInterval(updateTimes, 60000);
+    return () => clearInterval(intervalId);
+  }, [cities, mounted]);
 
-  // Fetch pitch and icons once, using cache
+  // Fetch pitch and icons, using cache
   useEffect(() => {
     let isCancelled = false;
     (async () => {
       const results: City[] = await Promise.all(
         cities.map(async city => {
-          // If cached, reuse
           if (cityPitchCache[city.name]) {
             return { ...city, ...cityPitchCache[city.name] };
           }
@@ -71,11 +76,9 @@ export default function SplitFlapBoard({
             });
             if (!res.ok) throw new Error("Network error");
             const { pitch, icons } = await res.json();
-            // Cache the result
             cityPitchCache[city.name] = { salesPitch: pitch, icons };
             return { ...city, salesPitch: pitch, icons };
           } catch {
-            // Cache empty to avoid retry loop
             cityPitchCache[city.name] = {};
             return city;
           }
@@ -86,7 +89,7 @@ export default function SplitFlapBoard({
     return () => { isCancelled = true; };
   }, [cities]);
 
-  // GSAP split-flap animation
+  // GSAP animation
   useEffect(() => {
     if (!mounted || !boardRef.current) return;
     const letters = boardRef.current.querySelectorAll('.letter');
@@ -121,7 +124,7 @@ export default function SplitFlapBoard({
           <div className="flex justify-center space-x-2">
             {city.icons && city.icons.length > 0 ? (
               city.icons.map(iconName => {
-                const IconComp = (Icons as any)[iconName];
+                const IconComp = (Icons as IconCollection)[iconName];
                 return IconComp ? (
                   <IconComp
                     key={iconName}
