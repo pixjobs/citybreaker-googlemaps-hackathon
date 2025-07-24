@@ -6,7 +6,7 @@ import Image from "next/image";
 import {
   FaTimes, FaDice, FaUtensils, FaTheaterMasks, FaRedo,
   FaSpinner, FaStar, FaMapSigns, FaGlobe, FaBookOpen,
-  FaMapMarkerAlt,
+  FaMapMarkerAlt, FaGamepad, FaDragon,
 } from "react-icons/fa";
 
 interface Suggestion {
@@ -30,6 +30,9 @@ interface SurpriseMeProps {
   onZoomToLocation: (location: { lat: number; lng: number }) => void;
 }
 
+// MODIFIED: Added new prompt types
+type SurprisePrompt = "hungry" | "entertain" | "surprise" | "gamersParadise" | "mtgHotspots";
+
 export default function SurpriseMe({
   isOpen,
   onClose,
@@ -49,7 +52,8 @@ export default function SurpriseMe({
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const fetchSuggestions = useCallback(
-    async (prompt: "hungry" | "entertain" | "surprise") => {
+    // MODIFIED: Updated function signature to accept new prompt types
+    async (prompt: SurprisePrompt) => {
       setViewState("loading");
       setError(null);
       tabRefs.current = [];
@@ -83,7 +87,8 @@ export default function SurpriseMe({
     [city]
   );
 
-  const handlePromptClick = (prompt: "hungry" | "entertain" | "surprise") => {
+  // MODIFIED: Updated function signature to accept new prompt types
+  const handlePromptClick = (prompt: SurprisePrompt) => {
     gsap.to(promptContainerRef.current, {
       y: -20,
       autoAlpha: 0,
@@ -205,6 +210,16 @@ export default function SurpriseMe({
             <button onClick={() => handlePromptClick("entertain")} className="prompt-button">
               <FaTheaterMasks />
               <span>Entertain Me</span>
+            </button>
+            {/* ADDED: Gamers Paradise Button */}
+            <button onClick={() => handlePromptClick("gamersParadise")} className="prompt-button">
+              <FaGamepad />
+              <span>Gamers Paradise</span>
+            </button>
+            {/* ADDED: MTG Hotspots Button */}
+            <button onClick={() => handlePromptClick("mtgHotspots")} className="prompt-button">
+              <FaDragon />
+              <span>MTG Hotspots</span>
             </button>
             <button onClick={() => handlePromptClick("surprise")} className="prompt-button">
               <FaDice />

@@ -63,25 +63,20 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
   const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [isMounted, setIsMounted] = useState(false);
 
-  // Use a ref to hold the onClose callback. This prevents the useEffect hook
-  // from re-running if the parent component passes a new function reference.
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  // Stabilize the 'places' dependency by stringifying it.
   const placesJson = JSON.stringify(places);
 
   useEffect(() => {
     setIsMounted(true);
 
-    // Define the async data fetching function *inside* the effect.
     const fetchData = async () => {
       setPanelLoading(true);
       setError(null);
       setItineraryData([]);
-
       const currentPlaces = JSON.parse(placesJson);
 
       if (!cityName || !currentPlaces || currentPlaces.length === 0) {
@@ -113,10 +108,8 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
 
     fetchData();
     
-    // Animate the panel on mount
     gsap.fromTo(panelRef.current, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' });
 
-    // Setup keyboard listener
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onCloseRef.current();
@@ -124,11 +117,9 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
     };
     document.addEventListener('keydown', handleKeyDown);
 
-    // Cleanup listener on unmount
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  // The effect correctly depends on stable values. It will only re-run if the trip length or places/city actually change.
   }, [currentTripLength, cityName, placesJson]);
 
   const downloadPDF = useCallback(async () => {
@@ -156,7 +147,6 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
     }
   }, [itineraryData, pdfLoading, cityName, currentTripLength, placesJson]);
   
-  // Hydration-safe guard: render nothing on the server or initial client render.
   if (!isMounted) {
     return null;
   }
@@ -175,9 +165,13 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
       `}</style>
 
       <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm" onClick={onClose}>
+        {/* 
+          FIXED: Removed fixed height calculation (h-[calc(...)]) and added `bottom-0`.
+          This makes the panel's height flexible and correctly handles mobile browser UI, fixing the scrolling issue.
+        */}
         <div 
           ref={panelRef} 
-          className="absolute top-[80px] left-0 right-0 bg-neutral-900 text-neutral-200 font-sans shadow-2xl flex flex-col border-t border-neutral-700/50 h-[calc(100vh-80px)] overflow-y-auto sm:top-[88px] sm:h-[calc(100vh-88px)] sm:left-1/2 sm:-translate-x-1/2 sm:max-w-4xl sm:w-full sm:rounded-2xl sm:border no-scrollbar"
+          className="absolute top-[80px] bottom-0 left-0 right-0 bg-neutral-900 text-neutral-200 font-sans shadow-2xl flex flex-col border-t border-neutral-700/50 overflow-y-auto sm:top-[88px] sm:left-1/2 sm:-translate-x-1/2 sm:max-w-4xl sm:w-full sm:rounded-2xl sm:border no-scrollbar"
           onClick={(e) => e.stopPropagation()}
         >
           <header className="sticky top-0 z-20 bg-neutral-900/80 backdrop-blur-md p-3 sm:p-4 flex justify-end items-center border-b border-neutral-700/50">

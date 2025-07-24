@@ -16,11 +16,12 @@ const config = {
     detailsUrl: 'https://maps.googleapis.com/maps/api/place/details/json',
     photoBaseUrl: 'https://maps.googleapis.com/maps/api/place/photo',
   },
-  fallbackPhotoUrl: 'https://images.unsplash.com/photo-1574704149954-a82d4474b975?q=80&w=1932&auto=format&fit=crop',
+  // MODIFIED: Replaced the broken Unsplash URL with a new, reliable one
+  fallbackPhotoUrl: 'https://images.unsplash.com/photo-1522199755839-a2bacb67c546?q=80&w=2072&auto=format&fit=crop',
 };
 
 const SurpriseRequestSchema = z.object({
-  prompt: z.enum(['hungry', 'entertain', 'surprise']),
+  prompt: z.enum(['hungry', 'entertain', 'surprise', 'gamersParadise', 'mtgHotspots']),
   city: z.object({
     name: z.string().min(1),
     lat: z.number(),
@@ -28,7 +29,6 @@ const SurpriseRequestSchema = z.object({
   }),
 });
 
-// --- MODIFICATION: Added 'geometry' to the interface ---
 interface GooglePlace {
   place_id: string;
   name: string;
@@ -64,6 +64,14 @@ function getPlaceQueryForPrompt(prompt: z.infer<typeof SurpriseRequestSchema>['p
     hungry: { type: 'restaurant', keyword: 'highly rated memorable dinner unique' },
     entertain: { type: 'tourist_attraction', keyword: 'live music art gallery unique show' },
     surprise: { type: 'point_of_interest', keyword: 'hidden gem unique experience local favorite' },
+    gamersParadise: {
+      type: 'establishment',
+      keyword: 'PC Bang esports arena gaming cafe LAN center internet cafe top rated',
+    },
+    mtgHotspots: {
+      type: 'store',
+      keyword: 'Magic the Gathering LGS local game store trading card store hobby shop top rated',
+    },
   };
   return queries[prompt];
 }
@@ -125,10 +133,11 @@ export async function POST(req: NextRequest) {
       throw new Error('API keys not loaded.');
     }
 
+    const queryDetails = getPlaceQueryForPrompt(prompt);
     const allPlaces = await findPlacesResiliently({
-      keyword: getPlaceQueryForPrompt(prompt).keyword,
+      keyword: queryDetails.keyword,
       city,
-      type: getPlaceQueryForPrompt(prompt).type,
+      type: queryDetails.type,
       apiKey: mapsKey,
     });
 
@@ -144,7 +153,6 @@ export async function POST(req: NextRequest) {
 
     const suggestionPromises = placesToSuggest.map(async (place) => {
       try {
-        // --- MODIFICATION: Added 'geometry' to the fields parameter ---
         const detailsParams = new URLSearchParams({
           place_id: place.place_id,
           fields: 'name,formatted_address,rating,photos,website,geometry',
@@ -190,7 +198,7 @@ export async function POST(req: NextRequest) {
         } catch {
           console.error('Failed to parse Gemini JSON:', geminiText);
           geminiData = {
-            description: geminiText,
+            description: `Welcome to ${details.name}, a fantastic local spot!`,
             whyWorthIt: 'An unforgettable local experience!',
             transportInfo: 'Check local maps for the best route.',
           };
@@ -202,7 +210,6 @@ export async function POST(req: NextRequest) {
 
         const tripAdvisorUrl = `https://www.tripadvisor.com/Search?q=${encodeURIComponent(details.name + ' ' + city.name)}`;
         
-        // --- MODIFICATION: Added 'lat' and 'lng' to the final returned object ---
         return {
           name: details.name,
           photoUrl,

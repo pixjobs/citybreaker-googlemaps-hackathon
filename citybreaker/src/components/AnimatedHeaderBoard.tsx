@@ -62,18 +62,6 @@ export default function AnimatedHeaderBoard({
       action: "toggle-satellite",
       active: isSatelliteView 
     },
-    { 
-      label: "Landmarks", 
-      icon: <Landmark size={18} />, 
-      action: "toggle-landmarks", 
-      active: showLandmarks 
-    },
-    { 
-      label: "Restaurants", 
-      icon: <Utensils size={18} />, 
-      action: "toggle-restaurants",
-      active: showRestaurants
-    },
   ];
 
   useEffect(() => {
