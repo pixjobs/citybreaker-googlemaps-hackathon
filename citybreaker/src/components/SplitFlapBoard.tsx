@@ -140,11 +140,13 @@ export default function SplitFlapBoard({
           </div>
           <div className="flex justify-center space-x-2">
             {city.icons && city.icons.length > 0 ? (
-              city.icons.map((iconName) => {
+              // Add 'iconIndex' here to use in the key
+              city.icons.map((iconName, iconIndex) => {
                 const IconComp = Icons[iconName as keyof typeof Icons] as LucideIcon;
                 return IconComp ? (
+                  // FIX: Use a combination of the name and index for a truly unique key
                   <span
-                    key={iconName}
+                    key={`${iconName}-${iconIndex}`} 
                     className="text-yellow-200 hover:text-yellow-100"
                     onClick={(e) => e.stopPropagation()}
                   >
