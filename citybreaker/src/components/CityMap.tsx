@@ -10,26 +10,13 @@ import LocationMenuPopup, {
 } from "./LocationMenuPopup";
 import { useMaps } from "./providers/MapsProvider";
 
-// --- Terminal Retro-Dark Theme ---
+// --- Theme and Type Definitions (Unchanged) ---
 const retroDarkStyle: google.maps.MapTypeStyle[] = [ { elementType: "geometry", stylers: [{ color: "#1d1d1d" }] }, { elementType: "labels.text.stroke", stylers: [{ color: "#000000" }] }, { elementType: "labels.text.fill", stylers: [{ color: "#facc15" }] }, { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#444444" }] }, { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#facc15" }] }, { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#003300" }] }, { featureType: "road", elementType: "geometry", stylers: [{ color: "#333333" }] }, { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#facc15" }] }, { featureType: "transit", elementType: "geometry", stylers: [{ color: "#222222" }] }, { featureType: "water", elementType: "geometry", stylers: [{ color: "#000033" }] }, { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#facc15" }] }, ];
-
-// --- Type Definitions ---
 interface BasicPlaceInfo { name: string; address: string; photoUrl?: string; }
 interface PlacePhotoInfo { name: string; photoUrl?: string; }
 interface PlaceEditorialSummary { language?: string; overview?: string; }
 interface PlaceResultWithSummary extends google.maps.places.PlaceResult { editorial_summary?: PlaceEditorialSummary; }
-
-interface CityMapProps {
-  center: { lat: number; lng: number; zoom: number; name: string };
-  tripLength?: number;
-  onPlacesLoaded?: (photoUrls: string[]) => void;
-  isItineraryOpen: boolean;
-  onCloseItinerary: () => void;
-  isSatelliteView: boolean;
-  showLandmarks: boolean;
-  showRestaurants: boolean;
-  highlightedLocation?: { lat: number; lng: number } | null;
-}
+interface CityMapProps { center: { lat: number; lng: number; zoom: number; name: string }; tripLength?: number; onPlacesLoaded?: (photoUrls: string[]) => void; isItineraryOpen: boolean; onCloseItinerary: () => void; isSatelliteView: boolean; showLandmarks: boolean; showRestaurants: boolean; highlightedLocation?: { lat: number; lng: number } | null; }
 
 function useAnimatedPanel( panelRef: React.RefObject<HTMLDivElement | null>, isOpen: boolean ) {
   const [isMobile, setIsMobile] = useState(false);
@@ -66,10 +53,11 @@ export default function CityMap({
   const [youtubeVideos, setYoutubeVideos] = useState<YouTubeVideo[]>([]);
   const [activeTab, setActiveTab] = useState<"info" | "reviews" | "videos">("info");
   
-  // --- FIX: Removed the unused `isLoading` state ---
-  // const [isLoading, setIsLoading] = useState(false);
+  // --- FIX 1: Create a single source of truth for whether the panel should be open ---
+  const shouldOpenItinerary = isItineraryOpen && placePhotos.length > 0;
 
-  useAnimatedPanel(panelRef, isItineraryOpen);
+  // --- FIX 2: The animation now depends on the new, reliable variable ---
+  useAnimatedPanel(panelRef, shouldOpenItinerary);
 
   useEffect(() => { if (mapRef.current) { mapRef.current.panTo({ lat: center.lat, lng: center.lng }); mapRef.current.setZoom(center.zoom); } }, [center]);
   useEffect(() => { if (!mapRef.current || !isLoaded) return; if (highlightMarkerRef.current) { highlightMarkerRef.current.setMap(null); highlightMarkerRef.current = null; } if (highlightedLocation) { const marker = new window.google.maps.Marker({ position: highlightedLocation, map: mapRef.current, icon: { url: "/highlight-marker.png", scaledSize: new google.maps.Size(60, 60), anchor: new google.maps.Point(30, 60), }, animation: window.google.maps.Animation.DROP, zIndex: 999, }); highlightMarkerRef.current = marker; } }, [highlightedLocation, isLoaded]);
@@ -104,7 +92,6 @@ export default function CityMap({
   
   useEffect(() => {
     if (!isLoaded || !window.google?.maps?.Map) return;
-    // --- FIX: Removed setIsLoading(true) ---
     setPlacePhotos([]);
     clearMarkers(attractionMarkersRef);
     clearMarkers(landmarkMarkersRef);
@@ -128,7 +115,6 @@ export default function CityMap({
       } else {
         console.error("NearbySearch for attractions failed:", status);
       }
-      // --- FIX: Removed setIsLoading(false) ---
     });
   }, [isLoaded, center, onPlacesLoaded, clearMarkers, fetchAndShowPlaceDetails]);
   
@@ -153,10 +139,12 @@ export default function CityMap({
       <div id="map" className="absolute inset-0 z-0" />
       <LocationMenuPopup isOpen={isPopupOpen} onClose={() => setIsPopupOpen(false)} place={selectedPlaceBasic} details={selectedPlaceDetails} youtubeVideos={youtubeVideos} isLoading={isDetailsLoading} isVideosLoading={isVideosLoading} activeTab={activeTab} setActiveTab={setActiveTab}/>
       <div ref={panelRef} className="fixed inset-0 z-20 opacity-0 pointer-events-none" style={{ transform: "translateY(100%) translateX(100%)" }}>
-        {isItineraryOpen && (
+        {/* FIX 3: The entire panel is now conditionally rendered using the new variable */}
+        {shouldOpenItinerary && (
           <ItineraryPanel
             cityName={center.name}
-            placePhotos={placePhotos}
+            // FIX 4: Pass the prop with the name the child component expects (`places`)
+            places={placePhotos}
             onClose={onCloseItinerary}
             tripLength={tripLength}
           />

@@ -1,282 +1,191 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { FaSpinner, FaTimes, FaFilePdf } from 'react-icons/fa';
+import { Loader, X, FileDown, Users, Wallet, Star, Pin } from 'lucide-react';
 import gsap from 'gsap';
 import { saveAs } from 'file-saver';
 import Image from 'next/image';
+import ReactMarkdown from 'react-markdown';
 
-interface PlacePhotoInfo {
-  name: string;
-  photoUrl?: string;
-}
+// --- Configuration ---
+const MIN_TRIP_DAYS = 3;
+const MAX_TRIP_DAYS = 7;
 
-interface ItineraryDay {
-  title: string;
-  activities: string[];
-  dayPhoto?: string;
-}
+// --- Type Definitions ---
+interface EnrichedPlace { name: string; photoUrl?: string; website?: string; googleMapsUrl?: string; }
+interface ItineraryActivity { title: string; description: string; whyVisit: string; insiderTip: string; priceRange: string; audience: string; placeName: string; }
+interface ItineraryDay { title: string; dayPhotoUrl?: string; activities: ItineraryActivity[]; }
+interface ApiResponse { city: string; days: number; places: EnrichedPlace[]; itinerary: ItineraryDay[]; }
 
 interface ItineraryPanelProps {
   cityName: string;
-  placePhotos: PlacePhotoInfo[];
+  places: { name: string }[];
   onClose: () => void;
   tripLength: number;
-  onTripLengthChange?: (days: number) => void;
 }
 
-const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
-  cityName,
-  placePhotos,
-  onClose,
-  tripLength,
-  onTripLengthChange,
-}) => {
+const ActivityCard: React.FC<{ activity: ItineraryActivity; place?: EnrichedPlace }> = ({ activity, place }) => (
+  <div className="bg-neutral-800/50 rounded-xl overflow-hidden flex flex-col sm:flex-row shadow-lg border border-neutral-700/60">
+    <div className="relative w-full sm:w-1/3 h-40 sm:h-auto flex-shrink-0">
+      {place?.photoUrl ? (
+        <Image src={place.photoUrl} alt={activity.title.replace(/"/g, "'")} fill className="object-cover" sizes="(max-width: 640px) 100vw, 33vw" />
+      ) : (
+        <div className="w-full h-full bg-neutral-800 flex items-center justify-center"><Pin className="text-neutral-600" size={32} /></div>
+      )}
+    </div>
+    <div className="p-4 sm:p-5 flex flex-col">
+      <h4 className="font-serif text-lg sm:text-xl font-bold text-amber-300 mb-2">{activity.title}</h4>
+      <div className="flex items-center gap-x-4 gap-y-1 mb-3 text-neutral-400 text-xs sm:text-sm flex-wrap">
+        <span className="flex items-center gap-1.5"><Wallet size={14} className="text-amber-400/80" /> {activity.priceRange}</span>
+        <span className="flex items-center gap-1.5"><Users size={14} className="text-amber-400/80" /> {activity.audience}</span>
+      </div>
+      <div className="text-neutral-300 prose prose-sm prose-invert prose-p:leading-relaxed mb-4">
+        <ReactMarkdown>{activity.description}</ReactMarkdown>
+      </div>
+      <div className="mt-auto pt-3 border-t border-neutral-700/60 grid grid-cols-1 gap-3 text-xs sm:text-sm">
+        <div className="flex items-start gap-2"><Star className="text-amber-400 flex-shrink-0 mt-0.5" size={14} /><div><h5 className="font-semibold text-neutral-200 mb-0.5">Why Visit</h5><p className="text-neutral-400">{activity.whyVisit}</p></div></div>
+        <div className="flex items-start gap-2"><Pin className="text-amber-400 flex-shrink-0 mt-0.5" size={14} /><div><h5 className="font-semibold text-neutral-200 mb-0.5">Insider Tip</h5><p className="text-neutral-400">{activity.insiderTip}</p></div></div>
+      </div>
+    </div>
+  </div>
+);
+
+const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClose, tripLength }) => {
   const [itineraryData, setItineraryData] = useState<ItineraryDay[]>([]);
-  const [displayPlaces, setDisplayPlaces] = useState<PlacePhotoInfo[]>(placePhotos);
+  const [enrichedPlaces, setEnrichedPlaces] = useState<EnrichedPlace[]>([]);
   const [panelLoading, setPanelLoading] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [activeDay, setActiveDay] = useState(0);
-  const [currentTripLength, setCurrentTripLength] = useState(tripLength > 0 ? tripLength : 3);
+  const [currentTripLength, setCurrentTripLength] = useState(Math.max(tripLength, MIN_TRIP_DAYS));
   const panelRef = useRef<HTMLDivElement>(null);
   const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const carouselRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  const fetchItinerary = useCallback(async () => {
+  const fetchItinerary = useCallback(async (days: number) => {
     setPanelLoading(true);
+    setError(null);
     setItineraryData([]);
-    setActiveDay(0);
-    setDisplayPlaces(placePhotos);
 
-    if (cityName && placePhotos.length > 0 && currentTripLength >= 1) {
-      try {
-        const res = await fetch('/api/gemini-recommendations/json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ places: placePhotos, tripLength: currentTripLength, cityName }),
-        });
-
-        if (!res.ok) {
-          const error = await res.json();
-          alert(`Itinerary fetch failed: ${error.error || res.statusText}`);
-        } else {
-          const data = await res.json();
-          if (Array.isArray(data.itinerary)) {
-            setItineraryData(data.itinerary);
-            if (Array.isArray(data.enrichedPlaces)) {
-              setDisplayPlaces(data.enrichedPlaces);
-            }
-          } else {
-            alert('Unexpected itinerary format received.');
-          }
-        }
-      } catch (err) {
-        console.error('Fetch error:', err);
-        alert('Network error while fetching itinerary.');
-      }
+    if (!cityName || !places || places.length === 0) {
+      setError("City name and places are required to generate an itinerary.");
+      setPanelLoading(false);
+      return;
     }
 
-    setPanelLoading(false);
-  }, [cityName, placePhotos, currentTripLength]);
+    try {
+      const res = await fetch('/api/gemini-recommendations/json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ places, tripLength: days, cityName }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || `Request failed with status ${res.status}`);
+      }
+      const data: ApiResponse = await res.json();
+      setItineraryData(data.itinerary || []);
+      setEnrichedPlaces(data.places || []);
+    } catch (err: unknown) {
+      console.error('Fetch error:', err);
+      setError(err instanceof Error ? err.message : "An unknown network error occurred.");
+    } finally {
+      setPanelLoading(false);
+    }
+  }, [cityName, places]);
 
-  useEffect(() => {
-    fetchItinerary();
-  }, [fetchItinerary]);
+  useEffect(() => { fetchItinerary(currentTripLength); }, [currentTripLength, fetchItinerary]);
 
   const downloadPDF = useCallback(async () => {
-    if (!itineraryData.length || panelLoading || pdfLoading) return;
-
+    if (!itineraryData.length || pdfLoading) return;
     setPdfLoading(true);
     try {
       const res = await fetch('/api/pdf-itinerary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ places: placePhotos, tripLength: currentTripLength, cityName }),
+        body: JSON.stringify({ places, tripLength: currentTripLength, cityName }),
       });
-
       if (!res.ok) {
-        const error = await res.json();
-        alert(`PDF generation failed: ${error.error || res.statusText}`);
-      } else {
-        const blob = await res.blob();
-        const contentDisposition = res.headers.get('Content-Disposition');
-        let filename = `${cityName.replace(/\s+/g, '_')}_${currentTripLength}d_Itinerary.pdf`;
-        if (contentDisposition) {
-          const match = /filename="([^"]+)"/.exec(contentDisposition);
-          if (match && match[1]) {
-            filename = match[1];
-          }
-        }
-        saveAs(blob, filename);
+        const errorData = await res.json();
+        throw new Error(errorData.error || `PDF generation failed with status ${res.status}`);
       }
-    } catch (err) {
-      console.error('PDF error:', err);
-      alert('Network error while generating PDF.');
+      const blob = await res.blob();
+      const filename = `${cityName.replace(/\s+/g, '_')}_${currentTripLength}d_Itinerary.pdf`;
+      saveAs(blob, filename);
+    } catch (err: unknown) {
+      console.error('PDF download error:', err);
+      alert(err instanceof Error ? `PDF Download Failed: ${err.message}` : "An unknown error occurred during PDF download.");
     } finally {
       setPdfLoading(false);
     }
-  }, [itineraryData, panelLoading, pdfLoading, placePhotos, currentTripLength, cityName]);
-
-  const handleDaysChange = (days: number) => {
-    setCurrentTripLength(days);
-    onTripLengthChange?.(days);
-  };
+  }, [itineraryData, pdfLoading, cityName, currentTripLength, places]);
 
   useEffect(() => {
-    const el = panelRef.current;
-    if (el) {
-      gsap.fromTo(el, { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.4 });
-    }
+    gsap.fromTo(panelRef.current, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' });
   }, []);
 
-  const scrollTo = (i: number) => {
+  const scrollTo = useCallback((i: number) => {
     setActiveDay(i);
     const container = panelRef.current;
     const target = contentRefs.current[i];
     if (container && target) {
-      gsap.to(container, {
-        scrollTop: target.offsetTop - container.offsetTop,
-        duration: 0.5,
-        ease: 'power2.out',
-      });
+      const navHeight = 120;
+      gsap.to(container, { scrollTop: target.offsetTop - navHeight, duration: 0.6, ease: 'power3.inOut' });
     }
-  };
-
-  useEffect(() => {
-    contentRefs.current = contentRefs.current.slice(0, itineraryData.length);
-    carouselRefs.current = carouselRefs.current.slice(0, itineraryData.length);
-  }, [itineraryData]);
-
-  useEffect(() => {
-    itineraryData.forEach((day, i) => {
-      const container = carouselRefs.current[i];
-      if (!container) return;
-      const matches = displayPlaces.filter(p =>
-        day.activities.some(a => a.toLowerCase().includes(p.name.toLowerCase()))
-      );
-      const photos = matches.map(m => m.photoUrl).filter(Boolean);
-
-      if (photos.length > 1) {
-        const slides = Array.from(container.children) as HTMLElement[];
-        
-        gsap.set(slides, { opacity: 0 });
-
-        const tl = gsap.timeline({ repeat: -1 });
-        slides.forEach(slide => {
-          tl.to(slide, { opacity: 1, duration: 1 });
-          tl.to(slide, { opacity: 0, duration: 1 }, "+=2");
-        });
-      }
-    });
-  }, [displayPlaces, itineraryData]);
+  }, []);
 
   const isLoading = panelLoading || pdfLoading;
-  const hasData = itineraryData.length > 0;
+  const hasData = !panelLoading && !error && itineraryData.length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4 pt-6 sm:pt-4">
-      <div ref={panelRef} className="w-full max-w-3xl h-[85vh] bg-[#0f0f0f] text-[#f5f5f5] font-sans rounded-2xl overflow-y-auto shadow-2xl relative">
-        <div className="sticky top-0 bg-[#1a1a1a] p-4 flex flex-wrap gap-2 justify-between items-center border-b border-gray-800 z-10">
-          <h2 className="text-xl font-bold tracking-wide text-[#FFD600] w-full sm:w-auto">{cityName} Itinerary</h2>
-          <div className="flex items-center gap-2 ml-auto">
-            <select
-              value={currentTripLength}
-              onChange={e => handleDaysChange(Number(e.target.value))}
-              className="bg-black text-[#FFD600] border border-gray-700 rounded px-2 py-1"
-              disabled={isLoading}
-            >
-              {[3, 5, 7].map(n => (
-                <option key={n} value={n}>{n}-Day</option>
-              ))}
-            </select>
-            <button
-              onClick={downloadPDF}
-              disabled={isLoading || !hasData}
-              className={`p-2 rounded transition ${
-                isLoading || !hasData
-                  ? 'text-gray-600 cursor-not-allowed'
-                  : 'text-[#FFD600] hover:bg-gray-800'
-              }`}
-              title="Download PDF"
-            >
-              {pdfLoading ? <FaSpinner className="animate-spin" /> : <FaFilePdf />}
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded hover:bg-gray-800 text-gray-400"
-              title="Close"
-            >
-              <FaTimes />
-            </button>
-          </div>
-        </div>
+    <>
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600&display=swap');
+        .font-serif { font-family: 'Playfair Display', serif; }
+        .font-sans { font-family: 'Inter', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
 
-        {hasData && (
-          <div className="sticky top-[64px] bg-[#1a1a1a] border-b border-gray-800 flex flex-wrap">
-            {itineraryData.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => scrollTo(i)}
-                className={`flex-1 py-2 text-sm font-medium transition ${
-                  i === activeDay
-                    ? 'bg-[#FFD600] text-black'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }`}
-              >
-                Day {i + 1}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="p-6 space-y-12">
-          {panelLoading ? (
-            <div className="flex justify-center py-20">
-              <FaSpinner className="animate-spin text-gray-500" size={28} />
-            </div>
-          ) : !hasData ? (
-            <p className="text-center text-gray-400 py-20">No itinerary data available.</p>
-          ) : (
-            itineraryData.map((day, i) => {
-              const matched = displayPlaces.filter(p =>
-                day.activities.some(a => a.toLowerCase().includes(p.name.toLowerCase()))
-              );
-              const photos = matched.map(m => m.photoUrl).filter(Boolean);
-              return (
-                // --- FIX: Changed the ref callback to a block body ---
-                <div key={i} ref={el => { contentRefs.current[i] = el; }} className="space-y-3">
-                  <h3 className="text-lg font-bold text-[#FFD600]">{day.title}</h3>
-                  {photos.length > 0 && (
-                    // --- FIX: Changed the ref callback to a block body ---
-                    <div
-                      className="relative w-full h-48 overflow-hidden rounded-lg shadow border border-[#FFD600]"
-                      ref={el => { carouselRefs.current[i] = el; }}
-                    >
-                      {photos.map((url, j) => (
-                        <Image
-                          key={j}
-                          src={url!}
-                          alt={`Photo for ${day.title} Day ${i + 1}`}
-                          fill
-                          className="object-cover rounded-md"
-                          sizes="(max-width: 768px) 100vw, 768px"
-                          priority={i === 0 && j === 0}
-                        />
+      <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm">
+        {/* MOVED DOWN: Increased top-[56px] to top-[80px] and sm:top-[60px] to sm:top-[88px], and adjusted height calcs */}
+        <div ref={panelRef} className="absolute top-[80px] left-0 right-0 bg-neutral-900 text-neutral-200 font-sans shadow-2xl flex flex-col border-t border-neutral-700/50 h-[calc(100vh-80px)] overflow-y-auto sm:top-[88px] sm:h-[calc(100vh-88px)] sm:left-1/2 sm:-translate-x-1/2 sm:max-w-4xl sm:w-full sm:rounded-2xl sm:border">
+          <main className="flex-grow p-3 sm:p-4 lg:p-6">
+            {panelLoading ? (
+              <div className="flex flex-col items-center justify-center h-full text-neutral-500 pt-10">
+                <Loader className="animate-spin mb-4" size={32} />
+                <p className="font-semibold">Crafting your personalized itinerary...</p>
+              </div>
+            ) : error ? (
+              <div className="text-center h-full flex flex-col items-center justify-center text-amber-400/80 pt-10">
+                <p className="font-semibold text-lg">Itinerary Generation Failed</p>
+                <p className="text-sm text-neutral-400 mt-2 max-w-md">{error}</p>
+              </div>
+            ) : (
+              <div className="space-y-6 sm:space-y-10">
+                {itineraryData.map((day, i) => (
+                  <div key={day.title} ref={el => { contentRefs.current[i] = el; }} className="space-y-4 sm:space-y-5">
+                    <div className="relative w-full h-18 sm:h-24 rounded-xl sm:rounded-2xl overflow-hidden border-2 border-amber-300/20">
+                      {day.dayPhotoUrl && <Image src={day.dayPhotoUrl} alt={day.title.replace(/"/g, "'")} fill className="object-cover" priority={i === 0} />}
+                      <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-black/80 to-transparent" />
+                      <div className="absolute bottom-0 left-0 p-3 sm:p-5">
+                        <span className="text-xs font-bold text-amber-300 uppercase tracking-widest">Day {i + 1}</span>
+                        {/* TITLE SMALLER: Changed text-lg sm:text-2xl to text-base sm:text-xl */}
+                        <h3 className="font-serif text-base sm:text-xl text-white mt-0.5 leading-tight">{day.title}</h3>
+                      </div>
+                    </div>
+                    <div className="space-y-4 sm:space-y-5">
+                      {day.activities.map((activity) => (
+                        <ActivityCard key={activity.title} activity={activity} place={enrichedPlaces.find(p => p.name === activity.placeName)} />
                       ))}
                     </div>
-                  )}
-                  <ul className="list-disc list-inside text-sm text-gray-300 space-y-1 pl-4">
-                    {day.activities.map((a, j) => (
-                      <li key={j}>{a}</li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })
-          )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </main>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 

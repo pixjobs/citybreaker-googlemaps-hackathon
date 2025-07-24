@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 
+// --- Configuration ---
 const GEMINI_SECRET_NAME = 'projects/934477100130/secrets/gemini-api-key/versions/latest';
 const MAPS_SECRET_NAME = 'projects/934477100130/secrets/maps-api-key/versions/latest';
 const MAPS_TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
@@ -13,30 +14,21 @@ const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const MAX_TRIP_DAYS = 7;
 const MIN_TRIP_DAYS = 3;
 
-interface Place {
-  name: string;
-  photoUrl?: string;
-}
+// --- Type Definitions ---
+interface EnrichedPlace { name: string; photoUrl?: string; website?: string; googleMapsUrl?: string; }
+interface IncomingPlace { name: string; }
+interface ItineraryActivity { title: string; description: string; whyVisit: string; insiderTip: string; priceRange: string; audience: string; placeName: string; }
+interface ItineraryDay { title: string; dayPhotoUrl?: string; activities: ItineraryActivity[]; }
 
-interface IncomingPlace {
-  name: string;
-}
-
-interface ItineraryDay {
-  title: string;
-  activities: string[];
-  dayPhoto?: string;
-}
-
+// --- Caching & Clients ---
 let cachedGeminiKey: string | null = null;
 let cachedMapsKey: string | null = null;
 let cachedGeminiClient: GoogleGenerativeAI | null = null;
 let secretManagerClient: SecretManagerServiceClient | null = null;
 
+// --- Helper Functions ---
 async function getSecretManagerClient(): Promise<SecretManagerServiceClient> {
-  if (!secretManagerClient) {
-    secretManagerClient = new SecretManagerServiceClient();
-  }
+  if (!secretManagerClient) secretManagerClient = new SecretManagerServiceClient();
   return secretManagerClient;
 }
 
@@ -56,167 +48,135 @@ async function getSecret(secretName: string): Promise<string | null> {
   }
 }
 
-async function enrichPlacesWithPhotos(places: IncomingPlace[], apiKey: string | null): Promise<Place[]> {
+async function enrichPlaces(places: IncomingPlace[], apiKey: string | null): Promise<EnrichedPlace[]> {
   if (!apiKey) {
-    console.warn('Maps API key is missing. Returning places without photos.');
+    console.warn('Maps API key is missing. Proceeding without place enrichment.');
     return places.map((p: IncomingPlace) => ({ name: p?.name || 'Unknown Place' }));
   }
-
   const enrichedPromises = places.map(async (place) => {
     const name = place?.name?.trim();
     if (!name) return { name: 'Unnamed Place' };
-
     try {
       const searchUrl = `${MAPS_TEXT_SEARCH_URL}?query=${encodeURIComponent(name)}&key=${apiKey}`;
       const searchRes = await fetch(searchUrl);
       if (!searchRes.ok) throw new Error(`TextSearch API error: ${searchRes.status}`);
       const searchJson = await searchRes.json();
-
       const firstResult = searchJson.results?.[0];
       const placeId = firstResult?.place_id;
       if (!placeId) {
         console.warn(`No results for "${name}"`);
         return { name };
       }
-
-      const detailsUrl = `${MAPS_DETAILS_URL}?place_id=${placeId}&fields=photos&key=${apiKey}`;
+      const detailsUrl = `${MAPS_DETAILS_URL}?place_id=${placeId}&fields=photos,website,url&key=${apiKey}`;
       const detailsRes = await fetch(detailsUrl);
       if (!detailsRes.ok) throw new Error(`Details API error: ${detailsRes.status}`);
       const detailsJson = await detailsRes.json();
-
-      const photoRef = detailsJson.result?.photos?.[0]?.photo_reference;
-      const photoUrl = photoRef
-        ? `${MAPS_PHOTO_BASE_URL}?maxwidth=800&photo_reference=${photoRef}&key=${apiKey}`
-        : undefined;
-
-      return { name, photoUrl };
+      const result = detailsJson.result;
+      const photoRef = result?.photos?.[0]?.photo_reference;
+      const photoUrl = photoRef ? `${MAPS_PHOTO_BASE_URL}?maxwidth=800&photo_reference=${photoRef}&key=${apiKey}` : undefined;
+      return { name, photoUrl, website: result?.website, googleMapsUrl: result?.url };
     } catch (error) {
       console.error(`Error enriching place "${name}":`, error);
       return { name };
     }
   });
-
   return Promise.all(enrichedPromises);
 }
 
-function parseItineraryMarkdown(markdown: string, enrichedPlaces: Place[]): ItineraryDay[] {
-  if (!markdown) return [];
-
-  return markdown.split('###').slice(1).map(block => {
-    const lines = block.trim().split('\n');
-    const heading = lines.shift() || '';
-
-    const photoMatch = heading.match(/\[\s*PHOTO_SUGGESTION:\s*"([^"]+)"\s*\]/i);
-    const title = heading.replace(/\[\s*PHOTO_SUGGESTION:[^\]]+\]/ig, '').trim();
-
-    let dayPhoto: string | undefined;
-    if (photoMatch?.[1]) {
-      const suggestion = photoMatch[1].toLowerCase();
-      dayPhoto = enrichedPlaces.find(p => p.name.toLowerCase() === suggestion)?.photoUrl;
-    }
-
-    const activities = lines
-      .map(line => line.replace(/^[-*]\s*/, '').trim())
-      .filter(Boolean);
-
-    return { title, activities, dayPhoto };
-  });
+function extractJsonFromString(text: string): string | null {
+    const match = text.match(/\{[\s\S]*\}/);
+    return match ? match[0] : null;
 }
 
-async function generateItineraryMarkdown(
-  geminiKey: string,
-  places: Place[],
-  days: number,
-  cityName: string
-): Promise<string> {
+async function generateItineraryJson(geminiKey: string, places: EnrichedPlace[], days: number, cityName: string): Promise<ItineraryDay[]> {
   if (!geminiKey) throw new Error('Gemini API key is missing.');
+  if (!cachedGeminiClient) cachedGeminiClient = new GoogleGenerativeAI(geminiKey);
 
-  if (!cachedGeminiClient) {
-    cachedGeminiClient = new GoogleGenerativeAI(geminiKey);
-  }
-
-  const model = cachedGeminiClient.getGenerativeModel({ model: GEMINI_MODEL });
-  const placeList = places.map(p => `- ${p.name}`).join('\n');
-
-  const prompt = `Generate a ${days}-day Markdown itinerary for ${cityName}.
-Each day starts with "### Day N: Title [PHOTO_SUGGESTION: "Place Name"]"
-Use 2–4 of the following places:
-${placeList}
-
-Example:
-### Day 1: Welcome to the City [PHOTO_SUGGESTION: "Main Plaza"]
-
-Be engaging and structured.`;
-
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.7 }
+  const model = cachedGeminiClient.getGenerativeModel({
+    model: GEMINI_MODEL,
+    generationConfig: { responseMimeType: "application/json" }
   });
 
-  const markdown = await result.response.text();
-  if (!markdown) throw new Error('Empty response from Gemini.');
-  return markdown;
+  const placeList = places.map(p => `"${p.name}"`).join(', ');
+  const prompt = `
+    You are a world-class travel concierge. For a ${days}-day trip to ${cityName}, generate a response as a valid JSON object.
+    Your entire response must be ONLY the JSON object, starting with { and ending with }. Do not include any other text or markdown.
+    The JSON object must have a single key "itinerary", which is an array of day objects.
+    Each day object must have "title", "dayPhotoSuggestion", and "activities" keys.
+    Each activity object must have "title", "description", "whyVisit", "insiderTip", "priceRange", "audience", and "placeName" keys.
+    The "placeName" value must be an exact name from this list: [${placeList}].
+    The tone must be sophisticated and inspiring.
+    `;
+
+  const result = await model.generateContent(prompt);
+  const responseText = result.response.text();
+
+  try {
+    const cleanJsonString = extractJsonFromString(responseText);
+    if (!cleanJsonString) {
+        throw new Error("No valid JSON object found in the AI response.");
+    }
+    const data = JSON.parse(cleanJsonString);
+    return (data.itinerary || []).map((day: any) => {
+        const suggestedPlaceName = day.dayPhotoSuggestion?.toLowerCase();
+        const photoPlace = places.find(p => p.name.toLowerCase() === suggestedPlaceName);
+        return {
+            title: day.title,
+            activities: day.activities,
+            dayPhotoUrl: photoPlace?.photoUrl
+        };
+    });
+  } catch (e) {
+    console.error("--- DEBUG: Failed to parse Gemini JSON for itinerary. Raw response was: ---");
+    console.error(responseText);
+    console.error("--- END DEBUG ---");
+    throw new Error("Could not generate a valid itinerary structure from AI response.");
+  }
 }
 
+// --- Simplified Route Handler ---
 export async function POST(req: NextRequest) {
   let body;
   try {
     body = await req.json();
   } catch (error) {
-    console.error('Failed to parse JSON body:', error);
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { places = [], tripLength = 3, cityName = 'CityBreaker' } = body as {
-    places: IncomingPlace[];
-    tripLength?: number;
-    cityName?: string;
-  };
+  const { places = [], tripLength = 3, cityName = 'CityBreaker' } = body as { places: IncomingPlace[]; tripLength?: number; cityName?: string; };
 
-  if (!Array.isArray(places) || !places.length) {
-    return NextResponse.json({ error: 'A non-empty "places" array is required.' }, { status: 400 });
-  }
-
-  if (typeof cityName !== 'string' || !cityName.trim()) {
-    return NextResponse.json({ error: 'A valid "cityName" is required.' }, { status: 400 });
-  }
-
-  if (typeof tripLength !== 'number' || tripLength < MIN_TRIP_DAYS) {
-    return NextResponse.json({ error: `"tripLength" must be at least ${MIN_TRIP_DAYS} days.` }, { status: 400 });
-  }
-
+  if (!Array.isArray(places) || !places.length) { return NextResponse.json({ error: 'A non-empty "places" array is required.' }, { status: 400 }); }
+  if (typeof cityName !== 'string' || !cityName.trim()) { return NextResponse.json({ error: 'A valid "cityName" is required.' }, { status: 400 }); }
+  if (typeof tripLength !== 'number' || tripLength < MIN_TRIP_DAYS) { return NextResponse.json({ error: `"tripLength" must be at least ${MIN_TRIP_DAYS} day(s).` }, { status: 400 }); }
+  
   const days = Math.min(Math.max(tripLength, MIN_TRIP_DAYS), MAX_TRIP_DAYS);
 
-  const geminiKey = cachedGeminiKey || await getSecret(GEMINI_SECRET_NAME);
-  const mapsKey = cachedMapsKey || await getSecret(MAPS_SECRET_NAME);
-  if (!geminiKey) return NextResponse.json({ error: 'Missing Gemini key' }, { status: 500 });
-
-  cachedGeminiKey = geminiKey;
-  cachedMapsKey = mapsKey;
-
-  let enrichedPlaces: Place[] = [];
   try {
-    enrichedPlaces = await enrichPlacesWithPhotos(places, mapsKey);
-  } catch (error) {
-    console.error('Place enrichment failed:', error);
-  }
+    // Fetch keys
+    if (!cachedGeminiKey) cachedGeminiKey = await getSecret(GEMINI_SECRET_NAME);
+    if (!cachedMapsKey) cachedMapsKey = await getSecret(MAPS_SECRET_NAME);
+    if (!cachedGeminiKey) {
+      console.error("FATAL: Gemini API key could not be retrieved.");
+      return NextResponse.json({ error: 'Server configuration error: Missing Gemini key' }, { status: 500 });
+    }
 
-  try {
-    const markdown = await generateItineraryMarkdown(geminiKey, enrichedPlaces, days, cityName);
-    const itinerary = parseItineraryMarkdown(markdown, enrichedPlaces);
+    // Step 1: Enrich places
+    const enrichedPlaces = await enrichPlaces(places, cachedMapsKey);
 
+    // Step 2: Generate itinerary
+    const itinerary = await generateItineraryJson(cachedGeminiKey, enrichedPlaces, days, cityName);
+
+    // Step 3: Return the final, compatible response
     return NextResponse.json({
       city: cityName,
       days,
       places: enrichedPlaces,
-      itinerary
+      itinerary: itinerary
     });
+
   } catch (error: unknown) {
-    let errorMessage = 'An unknown error occurred.';
-    if (error instanceof Error) {
-      errorMessage = error.message;
-    }
-    console.error('Failed to generate itinerary:', errorMessage);
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'An unknown error occurred during itinerary generation.';
+    console.error('Root error in POST handler:', error);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
