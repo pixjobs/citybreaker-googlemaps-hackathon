@@ -24,6 +24,7 @@ interface ItineraryPanelProps {
   tripLength: number;
 }
 
+// --- Child Component ---
 const ActivityCard: React.FC<{ activity: ItineraryActivity; place?: EnrichedPlace }> = ({ activity, place }) => (
   <div className="bg-neutral-800/50 rounded-xl overflow-hidden flex flex-col sm:flex-row shadow-lg border border-neutral-700/60">
     <div className="relative w-full sm:w-1/3 h-40 sm:h-auto flex-shrink-0">
@@ -50,59 +51,95 @@ const ActivityCard: React.FC<{ activity: ItineraryActivity; place?: EnrichedPlac
   </div>
 );
 
+// --- Main Panel Component ---
 const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClose, tripLength }) => {
   const [itineraryData, setItineraryData] = useState<ItineraryDay[]>([]);
   const [enrichedPlaces, setEnrichedPlaces] = useState<EnrichedPlace[]>([]);
   const [panelLoading, setPanelLoading] = useState(true);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeDay, setActiveDay] = useState(0);
   const [currentTripLength, setCurrentTripLength] = useState(Math.max(tripLength, MIN_TRIP_DAYS));
   const panelRef = useRef<HTMLDivElement>(null);
   const contentRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
 
-  const fetchItinerary = useCallback(async (days: number) => {
-    setPanelLoading(true);
-    setError(null);
-    setItineraryData([]);
+  // Use a ref to hold the onClose callback. This prevents the useEffect hook
+  // from re-running if the parent component passes a new function reference.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
-    if (!cityName || !places || places.length === 0) {
-      setError("City name and places are required to generate an itinerary.");
-      setPanelLoading(false);
-      return;
-    }
+  // Stabilize the 'places' dependency by stringifying it.
+  const placesJson = JSON.stringify(places);
 
-    try {
-      const res = await fetch('/api/gemini-recommendations/json', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ places, tripLength: days, cityName }),
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || `Request failed with status ${res.status}`);
+  useEffect(() => {
+    setIsMounted(true);
+
+    // Define the async data fetching function *inside* the effect.
+    const fetchData = async () => {
+      setPanelLoading(true);
+      setError(null);
+      setItineraryData([]);
+
+      const currentPlaces = JSON.parse(placesJson);
+
+      if (!cityName || !currentPlaces || currentPlaces.length === 0) {
+        setError("City name and places are required to generate an itinerary.");
+        setPanelLoading(false);
+        return;
       }
-      const data: ApiResponse = await res.json();
-      setItineraryData(data.itinerary || []);
-      setEnrichedPlaces(data.places || []);
-    } catch (err: unknown) {
-      console.error('Fetch error:', err);
-      setError(err instanceof Error ? err.message : "An unknown network error occurred.");
-    } finally {
-      setPanelLoading(false);
-    }
-  }, [cityName, places]);
 
-  useEffect(() => { fetchItinerary(currentTripLength); }, [currentTripLength, fetchItinerary]);
+      try {
+        const res = await fetch('/api/gemini-recommendations/json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ places: currentPlaces, tripLength: currentTripLength, cityName }),
+        });
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || `Request failed with status ${res.status}`);
+        }
+        const data: ApiResponse = await res.json();
+        setItineraryData(data.itinerary || []);
+        setEnrichedPlaces(data.places || []);
+      } catch (err: unknown) {
+        console.error('Fetch error:', err);
+        setError(err instanceof Error ? err.message : "An unknown network error occurred.");
+      } finally {
+        setPanelLoading(false);
+      }
+    };
+
+    fetchData();
+    
+    // Animate the panel on mount
+    gsap.fromTo(panelRef.current, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' });
+
+    // Setup keyboard listener
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup listener on unmount
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  // The effect correctly depends on stable values. It will only re-run if the trip length or places/city actually change.
+  }, [currentTripLength, cityName, placesJson]);
 
   const downloadPDF = useCallback(async () => {
     if (!itineraryData.length || pdfLoading) return;
     setPdfLoading(true);
+    const currentPlaces = JSON.parse(placesJson);
     try {
       const res = await fetch('/api/pdf-itinerary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ places, tripLength: currentTripLength, cityName }),
+        body: JSON.stringify({ places: currentPlaces, tripLength: currentTripLength, cityName }),
       });
       if (!res.ok) {
         const errorData = await res.json();
@@ -113,25 +150,16 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
       saveAs(blob, filename);
     } catch (err: unknown) {
       console.error('PDF download error:', err);
-      alert(err instanceof Error ? `PDF Download Failed: ${err.message}` : "An unknown error occurred during PDF download.");
+      alert(err instanceof Error ? `PDF Download Failed: ${err.message}` : "An unknown error occurred.");
     } finally {
       setPdfLoading(false);
     }
-  }, [itineraryData, pdfLoading, cityName, currentTripLength, places]);
-
-  useEffect(() => {
-    gsap.fromTo(panelRef.current, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power3.out' });
-  }, []);
-
-  const scrollTo = useCallback((i: number) => {
-    setActiveDay(i);
-    const container = panelRef.current;
-    const target = contentRefs.current[i];
-    if (container && target) {
-      const navHeight = 120;
-      gsap.to(container, { scrollTop: target.offsetTop - navHeight, duration: 0.6, ease: 'power3.inOut' });
-    }
-  }, []);
+  }, [itineraryData, pdfLoading, cityName, currentTripLength, placesJson]);
+  
+  // Hydration-safe guard: render nothing on the server or initial client render.
+  if (!isMounted) {
+    return null;
+  }
 
   const isLoading = panelLoading || pdfLoading;
   const hasData = !panelLoading && !error && itineraryData.length > 0;
@@ -146,9 +174,32 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
-      <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm">
-        {/* MOVED DOWN: Increased top-[56px] to top-[80px] and sm:top-[60px] to sm:top-[88px], and adjusted height calcs */}
-        <div ref={panelRef} className="absolute top-[80px] left-0 right-0 bg-neutral-900 text-neutral-200 font-sans shadow-2xl flex flex-col border-t border-neutral-700/50 h-[calc(100vh-80px)] overflow-y-auto sm:top-[88px] sm:h-[calc(100vh-88px)] sm:left-1/2 sm:-translate-x-1/2 sm:max-w-4xl sm:w-full sm:rounded-2xl sm:border">
+      <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm" onClick={onClose}>
+        <div 
+          ref={panelRef} 
+          className="absolute top-[80px] left-0 right-0 bg-neutral-900 text-neutral-200 font-sans shadow-2xl flex flex-col border-t border-neutral-700/50 h-[calc(100vh-80px)] overflow-y-auto sm:top-[88px] sm:h-[calc(100vh-88px)] sm:left-1/2 sm:-translate-x-1/2 sm:max-w-4xl sm:w-full sm:rounded-2xl sm:border no-scrollbar"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <header className="sticky top-0 z-20 bg-neutral-900/80 backdrop-blur-md p-3 sm:p-4 flex justify-end items-center border-b border-neutral-700/50">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={downloadPDF} 
+                disabled={isLoading || !hasData}
+                className="p-2 rounded-full text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Download itinerary as PDF"
+              >
+                {pdfLoading ? <Loader className="animate-spin" size={20} /> : <FileDown size={20} />}
+              </button>
+              <button 
+                onClick={onClose} 
+                className="p-2 rounded-full text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors"
+                aria-label="Close itinerary panel"
+              >
+                <X size={24} />
+              </button>
+            </div>
+          </header>
+
           <main className="flex-grow p-3 sm:p-4 lg:p-6">
             {panelLoading ? (
               <div className="flex flex-col items-center justify-center h-full text-neutral-500 pt-10">
@@ -169,12 +220,11 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({ cityName, places, onClo
                       <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-black/80 to-transparent" />
                       <div className="absolute bottom-0 left-0 p-3 sm:p-5">
                         <span className="text-xs font-bold text-amber-300 uppercase tracking-widest">Day {i + 1}</span>
-                        {/* TITLE SMALLER: Changed text-lg sm:text-2xl to text-base sm:text-xl */}
                         <h3 className="font-serif text-base sm:text-xl text-white mt-0.5 leading-tight">{day.title}</h3>
                       </div>
                     </div>
                     <div className="space-y-4 sm:space-y-5">
-                      {day.activities.map((activity) => (
+                      {day.activities.map(activity => (
                         <ActivityCard key={activity.title} activity={activity} place={enrichedPlaces.find(p => p.name === activity.placeName)} />
                       ))}
                     </div>
