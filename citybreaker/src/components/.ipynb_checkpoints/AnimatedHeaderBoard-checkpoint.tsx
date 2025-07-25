@@ -54,10 +54,8 @@ export default function AnimatedHeaderBoard({
       { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me", active: false, isToggle: false },
       { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary", active: false, isToggle: false },
       { label: isSatelliteView ? "Map View" : "Satellite View", icon: <Globe size={18} />, action: "toggle-satellite", active: isSatelliteView, isToggle: true },
-      { label: "Landmarks", icon: <Landmark size={18} />, action: "toggle-landmarks", active: showLandmarks, isToggle: true },
-      { label: "Restaurants", icon: <UtensilsCrossed size={18} />, action: "toggle-restaurants", active: showRestaurants, isToggle: true },
     ],
-    [isSatelliteView, showLandmarks, showRestaurants]
+    [isSatelliteView]
   );
 
   // --- EFFECTS ---
