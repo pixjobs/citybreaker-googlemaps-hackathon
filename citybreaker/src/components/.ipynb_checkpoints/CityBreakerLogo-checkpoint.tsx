@@ -10,13 +10,14 @@ import {
   FaBook,
   FaCity,
 } from "react-icons/fa";
-import SplitFlap from "@/components/SplitFlap";
 
-export default function CityBreakerLogo() {
+// The component now accepts a className prop to be controlled by its parent.
+export default function CityBreakerLogo({ className = "" }: { className?: string }) {
   const cubeRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Initial fade-in animation for the whole logo
     if (logoRef.current) {
       gsap.fromTo(
         logoRef.current,
@@ -25,6 +26,7 @@ export default function CityBreakerLogo() {
       );
     }
 
+    // Continuous 3D rotation for the icon cube
     if (cubeRef.current) {
       gsap.to(cubeRef.current, {
         rotateY: 360,
@@ -37,31 +39,31 @@ export default function CityBreakerLogo() {
   }, []);
 
   const icons = [
-    <FaPlaneDeparture key="plane" />,
-    <FaGlobe key="globe" />,
-    <FaMapMarkedAlt key="map" />,
-    <FaHeart key="heart" />,
-    <FaBook key="book" />,
-    <FaCity key="city" />,
+    <FaPlaneDeparture key="plane" />, <FaGlobe key="globe" />, <FaMapMarkedAlt key="map" />,
+    <FaHeart key="heart" />, <FaBook key="book" />, <FaCity key="city" />,
   ];
 
   return (
+    // The main container now uses the passed-in className for external sizing control.
+    // The internal gap is also slightly reduced and responsive.
     <div
       ref={logoRef}
-      className="flex items-center gap-4 text-yellow-300 font-bold text-xl tracking-widest"
+      className={`flex items-center gap-2 sm:gap-3 ${className}`}
     >
       {/* Rotating Cube of Icons */}
       <div
         ref={cubeRef}
-        className="w-10 h-10 relative transform-style-preserve-3d"
+        // ✅ COMPRESSED: Cube is now smaller (w-8 h-8) to fit better in the header.
+        className="w-8 h-8 relative transform-style-preserve-3d"
         style={{ perspective: "800px" }}
       >
         {icons.map((Icon, idx) => (
           <div
             key={idx}
-            className="absolute w-full h-full flex items-center justify-center text-xl bg-black border border-yellow-400 rounded shadow"
+            className="absolute w-full h-full flex items-center justify-center text-lg text-yellow-300 bg-black/50 border border-yellow-500/50 rounded shadow-md"
             style={{
-              transform: `rotateY(${idx * 60}deg) translateZ(25px)`,
+              // ✅ ADJUSTED: The translateZ value is smaller to match the new cube size.
+              transform: `rotateY(${idx * 60}deg) translateZ(15px)`,
               backfaceVisibility: "hidden",
             }}
           >
@@ -70,10 +72,10 @@ export default function CityBreakerLogo() {
         ))}
       </div>
 
-      {/* SplitFlap Text (Hidden on mobile) */}
-      <div className="hidden sm:inline-block">
-        <SplitFlap text="CityBreaker" />
-      </div>
+      {/* ✅ REPLACED: SplitFlap is gone. Replaced with a simple, responsive text element. */}
+      <span className="font-bold text-lg sm:text-xl tracking-widest text-yellow-300">
+        CityBreaker
+      </span>
     </div>
   );
 }

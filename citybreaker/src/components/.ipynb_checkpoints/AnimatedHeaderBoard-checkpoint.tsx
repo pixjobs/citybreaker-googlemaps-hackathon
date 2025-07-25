@@ -1,21 +1,18 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from "react";
 import gsap from "gsap";
+import { motion, AnimatePresence } from "framer-motion";
+
+// Component Imports
 import SplitFlapBoard from "@/components/SplitFlapBoard";
 import CityBreakerLogo from "@/components/CityBreakerLogo";
 import SearchBox from "./SearchBox";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Globe,
-  Compass,
-  Landmark,
-  Utensils,
-  MapPinned,
-  Menu,
-  X,
-} from "lucide-react";
 
+// Icon Imports
+import { Globe, Compass, MapPinned, Menu, X, Landmark, UtensilsCrossed, Check } from "lucide-react";
+
+// --- TYPE DEFINITIONS ---
 interface City {
   name: string;
   timezone: string;
@@ -23,66 +20,61 @@ interface City {
   lng: number;
 }
 
-// This is the correct, final interface for the component.
 interface AnimatedHeaderBoardProps {
   cities: City[];
   onSelectCity: (city: City) => void;
   onMenuAction: (action: string) => void;
-  onPlaceNavigate: (location: google.maps.LatLng) => void;
-  mapCenter: { lat: number; lng: number; };
+  onPlaceNavigate: (place: google.maps.places.PlaceResult) => void;
+  // This prop is still correct. It receives the LatLngBounds object,
+  // which the upgraded SearchBox needs for its `locationRestriction` parameter.
+  mapBounds: google.maps.LatLngBounds | null;
   isSatelliteView: boolean;
   showLandmarks: boolean;
   showRestaurants: boolean;
 }
 
+// --- MAIN COMPONENT ---
 export default function AnimatedHeaderBoard({
-  cities,
-  onSelectCity,
-  onMenuAction,
-  onPlaceNavigate,
-  mapCenter,
-  isSatelliteView,
-  showLandmarks,
-  showRestaurants,
+  cities, onSelectCity, onMenuAction, onPlaceNavigate, mapBounds,
+  isSatelliteView, showLandmarks, showRestaurants,
 }: AnimatedHeaderBoardProps) {
+  // --- REFS for DOM elements ---
   const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // --- STATE ---
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [boardTop, setBoardTop] = useState(0);
-  const [mounted, setMounted] = useState(false);
-  
-  const menuItems = [
-    { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me", active: false },
-    { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary", active: false },
-    { 
-      label: isSatelliteView ? "Map View" : "Satellite View", 
-      icon: <Globe size={18} />, 
-      action: "toggle-satellite",
-      active: isSatelliteView 
-    },
-  ];
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // useMemo prevents this array from being recreated on every render, improving performance.
+  const menuItems = useMemo(
+    () => [
+      { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me", active: false, isToggle: false },
+      { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary", active: false, isToggle: false },
+      { label: isSatelliteView ? "Map View" : "Satellite View", icon: <Globe size={18} />, action: "toggle-satellite", active: isSatelliteView, isToggle: true },
+      { label: "Landmarks", icon: <Landmark size={18} />, action: "toggle-landmarks", active: showLandmarks, isToggle: true },
+      { label: "Restaurants", icon: <UtensilsCrossed size={18} />, action: "toggle-restaurants", active: showRestaurants, isToggle: true },
+    ],
+    [isSatelliteView, showLandmarks, showRestaurants]
+  );
 
+  // --- EFFECTS ---
+
+  // Intro animation for the header
   useEffect(() => {
     if (containerRef.current) {
-      gsap.fromTo(
-        containerRef.current,
-        { y: -100, opacity: 0 },
-        { y: 0, opacity: 1, duration: 1, ease: "power4.out" }
-      );
+      gsap.fromTo(containerRef.current, { y: -100, opacity: 0 }, { y: 0, opacity: 1, duration: 1, ease: "power4.out" });
     }
   }, []);
 
+  // useLayoutEffect is best for measurements that need to be synchronous before browser paint
   useLayoutEffect(() => {
     function updateTop() {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        const gap = window.innerWidth < 640 ? 24 : 12;
+        const gap = window.innerWidth < 640 ? 16 : 8;
         setBoardTop(rect.bottom + gap);
       }
     }
@@ -91,6 +83,7 @@ export default function AnimatedHeaderBoard({
     return () => window.removeEventListener("resize", updateTop);
   }, []);
 
+  // Effect to handle closing the menu when clicking outside of it
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -101,10 +94,12 @@ export default function AnimatedHeaderBoard({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [menuOpen]);
 
-  const toggleBoard = () => {
-    const isOpen = !expanded;
-    setExpanded(isOpen);
-    if (boardRef.current) {
+  // --- MEMOIZED CALLBACKS for STABILITY & PERFORMANCE ---
+  
+  const toggleBoard = useCallback(() => {
+    setExpanded(prev => {
+      const isOpen = !prev;
+      if (!boardRef.current) return isOpen;
       gsap.to(boardRef.current, {
         height: isOpen ? "auto" : 0,
         opacity: isOpen ? 1 : 0,
@@ -113,39 +108,51 @@ export default function AnimatedHeaderBoard({
         onStart: () => { if (isOpen) boardRef.current!.style.display = "block"; },
         onComplete: () => { if (!isOpen) boardRef.current!.style.display = "none"; },
       });
-    }
-  };
+      return isOpen;
+    });
+  }, []);
 
-  const handleCitySelectAndClose = (city: City) => {
+  const handleCitySelectAndClose = useCallback((city: City) => {
     onSelectCity(city);
-    if (expanded) toggleBoard();
-  };
+    if (expanded) {
+      toggleBoard();
+    }
+  }, [expanded, onSelectCity, toggleBoard]);
 
-  const handleItemClick = (action: string) => {
+  const handleItemClick = useCallback((action: string) => {
     onMenuAction(action);
     setMenuOpen(false);
-  };
+  }, [onMenuAction]);
 
   return (
     <>
       <header
         ref={containerRef}
-        className="fixed top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-3xl z-50 bg-black/60 backdrop-blur-lg border border-yellow-500/50 text-yellow-300 rounded-xl shadow-lg"
+        className="fixed top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-4xl z-30 bg-black/60 backdrop-blur-lg border border-yellow-500/50 text-yellow-300 rounded-xl shadow-lg"
       >
-        <div className="flex items-center justify-between px-4 py-2">
-          <div className="hidden sm:flex items-center gap-3">
-            <CityBreakerLogo />
-          </div>
+        <div className="flex items-center justify-between w-full px-3 sm:px-4 py-2 gap-3 sm:gap-4">
           
-          <SearchBox 
-            onPlaceNavigate={onPlaceNavigate} 
-            mapCenter={mapCenter}
-          />
+          <div className="flex-shrink-0">
+            <CityBreakerLogo className="h-7 w-auto sm:h-8" />
+          </div>
 
-          <div className="flex items-center gap-2 sm:gap-4">
+          {/* This is the crucial logic block */}
+          <div className="flex-grow min-w-0">
+            {/* If `mapBounds` is a valid object (not null), render the functional SearchBox. */}
+            {mapBounds ? (
+              <SearchBox onPlaceNavigate={onPlaceNavigate} mapBounds={mapBounds} />
+            ) : (
+              // Otherwise, render the "greyed out" pulsing placeholder.
+              <div className="h-[42px] w-full bg-white/5 rounded-lg animate-pulse" aria-hidden="true" />
+            )}
+          </div>
+
+          <div className="flex-shrink-0 flex items-center gap-2">
             <button
               onClick={toggleBoard}
-              className="text-xs sm:text-sm border border-yellow-400 px-3 py-1 rounded-lg hover:bg-yellow-600/20 transition-colors whitespace-nowrap"
+              className="text-xs sm:text-sm border border-yellow-400 px-3 py-1.5 rounded-lg hover:bg-yellow-600/20 transition-colors whitespace-nowrap"
+              aria-expanded={expanded}
+              aria-controls="city-selector-board"
             >
               {expanded ? "Hide ▲" : "Cities ▼"}
             </button>
@@ -153,30 +160,40 @@ export default function AnimatedHeaderBoard({
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
                 className="border border-yellow-400 p-1.5 rounded-lg hover:bg-yellow-600/20 transition-colors"
+                aria-expanded={menuOpen}
+                aria-controls="header-menu"
               >
                 {menuOpen ? <X size={18} /> : <Menu size={18} />}
               </button>
               <AnimatePresence>
                 {menuOpen && (
                   <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.2 }}
-                    className="absolute right-0 mt-2 bg-black/90 backdrop-blur-lg border border-yellow-400 text-yellow-200 rounded-lg shadow-lg z-50 min-w-[200px] overflow-hidden"
+                    id="header-menu"
+                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="absolute right-0 mt-2 bg-black/90 backdrop-blur-xl border border-yellow-500/50 text-yellow-200 rounded-lg shadow-2xl z-50 min-w-[220px] overflow-hidden"
                   >
-                    {menuItems.map(item => (
-                      <button
-                        key={item.label}
-                        onClick={() => handleItemClick(item.action)}
-                        className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-yellow-600/20 text-left transition-colors ${
-                          item.active ? 'bg-yellow-500/20 font-bold' : ''
-                        }`}
-                      >
-                        {item.icon}
-                        <span className="text-sm">{item.label}</span>
-                      </button>
-                    ))}
+                    <ul>
+                      {menuItems.map((item) => (
+                        <li key={item.label} className="border-b border-white/10 last:border-b-0">
+                          <button
+                            onClick={() => handleItemClick(item.action)}
+                            className={`w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-yellow-600/20 text-left transition-colors ${
+                              item.active ? "bg-yellow-500/20" : ""
+                            }`}
+                            aria-pressed={item.isToggle ? item.active : undefined}
+                          >
+                            <div className="flex items-center gap-3">
+                              {item.icon}
+                              <span className={`text-sm ${item.active ? 'font-semibold' : ''}`}>{item.label}</span>
+                            </div>
+                            {item.active && <Check size={16} className="text-yellow-400" />}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -184,19 +201,15 @@ export default function AnimatedHeaderBoard({
           </div>
         </div>
       </header>
-
-      {mounted && (
-        <div
-          ref={boardRef}
-          className="fixed left-1/2 -translate-x-1/2 w-11/12 max-w-3xl z-40 bg-black/60 backdrop-blur-lg border border-yellow-500/50 border-t-0 rounded-b-xl shadow-lg overflow-hidden"
-          style={{ top: boardTop, height: 0, opacity: 0, display: 'none' }}
-        >
-          <SplitFlapBoard
-            cities={cities}
-            onSelectCity={handleCitySelectAndClose}
-          />
-        </div>
-      )}
+      
+      <div
+        id="city-selector-board"
+        ref={boardRef}
+        className="fixed left-1/2 -translate-x-1/2 w-11/12 max-w-4xl z-20 bg-black/60 backdrop-blur-lg border border-yellow-500/50 border-t-0 rounded-b-xl shadow-lg overflow-hidden"
+        style={{ top: boardTop, height: 0, opacity: 0, display: "none" }}
+      >
+        {expanded && <SplitFlapBoard cities={cities} onSelectCity={handleCitySelectAndClose} />}
+      </div>
     </>
   );
 }
