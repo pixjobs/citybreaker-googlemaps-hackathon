@@ -31,9 +31,17 @@ const CITIES: City[] = [
 ];
 
 const COUNTRY_COLORS: Record<string, string> = {
-  London: "#ff0000", Paris: "#0055A4", Berlin: "#000000", Mannheim: "#e2001a",
-  Prague: "#D7141A", Dubai: "#FFC300", Beijing: "#ffde00", Tokyo: "#bc002d",
-  Seoul: "#003478", "New York": "#3c3b6e", "San Francisco": "#b22222",
+  London: "#ff0000",
+  Paris: "#0055A4",
+  Berlin: "#000000",
+  Mannheim: "#e2001a",
+  Prague: "#D7141A",
+  Dubai: "#FFC300",
+  Beijing: "#ffde00",
+  Tokyo: "#bc002d",
+  Seoul: "#003478",
+  "New York": "#3c3b6e",
+  "San Francisco": "#b22222",
 };
 
 export default function HomePage() {
@@ -73,11 +81,21 @@ export default function HomePage() {
 
   const handleMenuAction = useCallback((action: string) => {
     switch (action) {
-      case "toggle-satellite": setIsSatelliteView(p => !p); break;
-      case "toggle-landmarks": setShowLandmarks(p => !p); break;
-      case "toggle-restaurants": setShowRestaurants(p => !p); break;
-      case "itinerary": setIsItineraryOpen(true); break;
-      case "surprise-me": setIsSurpriseMeOpen(true); break;
+      case "toggle-satellite":
+        setIsSatelliteView((prev) => !prev);
+        break;
+      case "toggle-landmarks":
+        setShowLandmarks((prev) => !prev);
+        break;
+      case "toggle-restaurants":
+        setShowRestaurants((prev) => !prev);
+        break;
+      case "itinerary":
+        setIsItineraryOpen(true);
+        break;
+      case "surprise-me":
+        setIsSurpriseMeOpen(true);
+        break;
     }
   }, []);
 
@@ -88,12 +106,17 @@ export default function HomePage() {
   useEffect(() => {
     const updateCityTime = () => {
       try {
-        const time = new Intl.DateTimeFormat("en-GB", { timeZone: selectedCity.timezone, hour: "2-digit", minute: "2-digit" }).format(new Date());
+        const time = new Intl.DateTimeFormat("en-GB", {
+          timeZone: selectedCity.timezone,
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date());
         setCityTime(time);
       } catch {
         setCityTime("--:--");
       }
     };
+
     updateCityTime();
     const interval = setInterval(updateCityTime, 60000);
     return () => clearInterval(interval);
@@ -105,6 +128,7 @@ export default function HomePage() {
 
       <CityMap
         center={center}
+        selectedCityName={selectedCity.name} // ✅ Pass correct prop to ItineraryPanel
         onPlacesLoaded={() => {}}
         isItineraryOpen={isItineraryOpen}
         onCloseItinerary={() => setIsItineraryOpen(false)}
@@ -139,7 +163,10 @@ export default function HomePage() {
 
       <div
         className="fixed bottom-6 left-6 z-30 hidden md:flex flex-col bg-black/80 px-4 py-2 rounded shadow-lg"
-        style={{ border: `1px solid ${COUNTRY_COLORS[selectedCity.name] || "white"}`, color: COUNTRY_COLORS[selectedCity.name] || "white" }}
+        style={{
+          border: `1px solid ${COUNTRY_COLORS[selectedCity.name] || "white"}`,
+          color: COUNTRY_COLORS[selectedCity.name] || "white",
+        }}
       >
         <div className="flex items-center gap-2">
           <SplitFlap text={selectedCity.name} />
