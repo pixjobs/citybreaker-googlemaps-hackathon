@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+} from "react";
 import gsap from "gsap";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -10,7 +17,14 @@ import CityBreakerLogo from "@/components/CityBreakerLogo";
 import SearchBox from "./SearchBox";
 
 // Icon Imports
-import { Globe, Compass, MapPinned, Menu, X, Landmark, UtensilsCrossed, Check } from "lucide-react";
+import {
+  Globe,
+  Compass,
+  MapPinned,
+  Menu,
+  X,
+  Check,
+} from "lucide-react";
 
 // --- TYPE DEFINITIONS ---
 interface City {
@@ -25,20 +39,20 @@ interface AnimatedHeaderBoardProps {
   onSelectCity: (city: City) => void;
   onMenuAction: (action: string) => void;
   onPlaceNavigate: (place: google.maps.places.PlaceResult) => void;
-  // This prop is still correct. It receives the LatLngBounds object,
-  // which the upgraded SearchBox needs for its `locationRestriction` parameter.
   mapBounds: google.maps.LatLngBounds | null;
   isSatelliteView: boolean;
-  showLandmarks: boolean;
-  showRestaurants: boolean;
 }
 
 // --- MAIN COMPONENT ---
 export default function AnimatedHeaderBoard({
-  cities, onSelectCity, onMenuAction, onPlaceNavigate, mapBounds,
-  isSatelliteView, showLandmarks, showRestaurants,
+  cities,
+  onSelectCity,
+  onMenuAction,
+  onPlaceNavigate,
+  mapBounds,
+  isSatelliteView,
 }: AnimatedHeaderBoardProps) {
-  // --- REFS for DOM elements ---
+  // --- REFS ---
   const containerRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -48,26 +62,47 @@ export default function AnimatedHeaderBoard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [boardTop, setBoardTop] = useState(0);
 
-  // useMemo prevents this array from being recreated on every render, improving performance.
   const menuItems = useMemo(
     () => [
-      { label: "Surprise Me", icon: <Compass size={18} />, action: "surprise-me", active: false, isToggle: false },
-      { label: "Itinerary", icon: <MapPinned size={18} />, action: "itinerary", active: false, isToggle: false },
-      { label: isSatelliteView ? "Map View" : "Satellite View", icon: <Globe size={18} />, action: "toggle-satellite", active: isSatelliteView, isToggle: true },
+      {
+        label: "Surprise Me",
+        icon: <Compass size={18} />,
+        action: "surprise-me",
+        active: false,
+        isToggle: false,
+      },
+      {
+        label: "Itinerary",
+        icon: <MapPinned size={18} />,
+        action: "itinerary",
+        active: false,
+        isToggle: false,
+      },
+      {
+        label: isSatelliteView ? "Map View" : "Satellite View",
+        icon: <Globe size={18} />,
+        action: "toggle-satellite",
+        active: isSatelliteView,
+        isToggle: true,
+      },
     ],
     [isSatelliteView]
   );
 
   // --- EFFECTS ---
 
-  // Intro animation for the header
+  // Animate header in
   useEffect(() => {
     if (containerRef.current) {
-      gsap.fromTo(containerRef.current, { y: -100, opacity: 0 }, { y: 0, opacity: 1, duration: 1, ease: "power4.out" });
+      gsap.fromTo(
+        containerRef.current,
+        { y: -100, opacity: 0 },
+        { y: 0, opacity: 1, duration: 1, ease: "power4.out" }
+      );
     }
   }, []);
 
-  // useLayoutEffect is best for measurements that need to be synchronous before browser paint
+  // Calculate board position on resize
   useLayoutEffect(() => {
     function updateTop() {
       if (containerRef.current) {
@@ -81,21 +116,25 @@ export default function AnimatedHeaderBoard({
     return () => window.removeEventListener("resize", updateTop);
   }, []);
 
-  // Effect to handle closing the menu when clicking outside of it
+  // Close menu when clicking outside
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
     };
-    if (menuOpen) document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
+    if (menuOpen) {
+      document.addEventListener("mousedown", onClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+    };
   }, [menuOpen]);
 
-  // --- MEMOIZED CALLBACKS for STABILITY & PERFORMANCE ---
-  
+  // --- CALLBACKS ---
+
   const toggleBoard = useCallback(() => {
-    setExpanded(prev => {
+    setExpanded((prev) => {
       const isOpen = !prev;
       if (!boardRef.current) return isOpen;
       gsap.to(boardRef.current, {
@@ -103,24 +142,34 @@ export default function AnimatedHeaderBoard({
         opacity: isOpen ? 1 : 0,
         duration: 0.5,
         ease: "power2.out",
-        onStart: () => { if (isOpen) boardRef.current!.style.display = "block"; },
-        onComplete: () => { if (!isOpen) boardRef.current!.style.display = "none"; },
+        onStart: () => {
+          if (isOpen) boardRef.current!.style.display = "block";
+        },
+        onComplete: () => {
+          if (!isOpen) boardRef.current!.style.display = "none";
+        },
       });
       return isOpen;
     });
   }, []);
 
-  const handleCitySelectAndClose = useCallback((city: City) => {
-    onSelectCity(city);
-    if (expanded) {
-      toggleBoard();
-    }
-  }, [expanded, onSelectCity, toggleBoard]);
+  const handleCitySelectAndClose = useCallback(
+    (city: City) => {
+      onSelectCity(city);
+      if (expanded) {
+        toggleBoard();
+      }
+    },
+    [expanded, onSelectCity, toggleBoard]
+  );
 
-  const handleItemClick = useCallback((action: string) => {
-    onMenuAction(action);
-    setMenuOpen(false);
-  }, [onMenuAction]);
+  const handleItemClick = useCallback(
+    (action: string) => {
+      onMenuAction(action);
+      setMenuOpen(false);
+    },
+    [onMenuAction]
+  );
 
   return (
     <>
@@ -129,19 +178,21 @@ export default function AnimatedHeaderBoard({
         className="fixed top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-4xl z-30 bg-black/60 backdrop-blur-lg border border-yellow-500/50 text-yellow-300 rounded-xl shadow-lg"
       >
         <div className="flex items-center justify-between w-full px-3 sm:px-4 py-2 gap-3 sm:gap-4">
-          
-          <div className="flex-shrink-0">
+          <div className="flex-shrink-0 hidden sm:block">
             <CityBreakerLogo className="h-7 w-auto sm:h-8" />
           </div>
 
-          {/* This is the crucial logic block */}
           <div className="flex-grow min-w-0">
-            {/* If `mapBounds` is a valid object (not null), render the functional SearchBox. */}
             {mapBounds ? (
-              <SearchBox onPlaceNavigate={onPlaceNavigate} mapBounds={mapBounds} />
+              <SearchBox
+                onPlaceNavigate={onPlaceNavigate}
+                mapBounds={mapBounds}
+              />
             ) : (
-              // Otherwise, render the "greyed out" pulsing placeholder.
-              <div className="h-[42px] w-full bg-white/5 rounded-lg animate-pulse" aria-hidden="true" />
+              <div
+                className="h-[42px] w-full bg-white/5 rounded-lg animate-pulse"
+                aria-hidden="true"
+              />
             )}
           </div>
 
@@ -175,7 +226,10 @@ export default function AnimatedHeaderBoard({
                   >
                     <ul>
                       {menuItems.map((item) => (
-                        <li key={item.label} className="border-b border-white/10 last:border-b-0">
+                        <li
+                          key={item.label}
+                          className="border-b border-white/10 last:border-b-0"
+                        >
                           <button
                             onClick={() => handleItemClick(item.action)}
                             className={`w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-yellow-600/20 text-left transition-colors ${
@@ -185,9 +239,17 @@ export default function AnimatedHeaderBoard({
                           >
                             <div className="flex items-center gap-3">
                               {item.icon}
-                              <span className={`text-sm ${item.active ? 'font-semibold' : ''}`}>{item.label}</span>
+                              <span
+                                className={`text-sm ${
+                                  item.active ? "font-semibold" : ""
+                                }`}
+                              >
+                                {item.label}
+                              </span>
                             </div>
-                            {item.active && <Check size={16} className="text-yellow-400" />}
+                            {item.active && (
+                              <Check size={16} className="text-yellow-400" />
+                            )}
                           </button>
                         </li>
                       ))}
@@ -199,14 +261,19 @@ export default function AnimatedHeaderBoard({
           </div>
         </div>
       </header>
-      
+
       <div
         id="city-selector-board"
         ref={boardRef}
         className="fixed left-1/2 -translate-x-1/2 w-11/12 max-w-4xl z-20 bg-black/60 backdrop-blur-lg border border-yellow-500/50 border-t-0 rounded-b-xl shadow-lg overflow-hidden"
         style={{ top: boardTop, height: 0, opacity: 0, display: "none" }}
       >
-        {expanded && <SplitFlapBoard cities={cities} onSelectCity={handleCitySelectAndClose} />}
+        {expanded && (
+          <SplitFlapBoard
+            cities={cities}
+            onSelectCity={handleCitySelectAndClose}
+          />
+        )}
       </div>
     </>
   );

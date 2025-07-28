@@ -51,8 +51,6 @@ export default function HomePage() {
   const [mapCenterOverride, setMapCenterOverride] = useState<{ lat: number; lng: number } | null>(null);
   const [cityTime, setCityTime] = useState("--:--");
   const [isSatelliteView, setIsSatelliteView] = useState(false);
-  const [showLandmarks, setShowLandmarks] = useState(false);
-  const [showRestaurants, setShowRestaurants] = useState(false);
 
   const { map, mapBounds, handleMapLoad, handleMapIdle } = useMapBounds();
 
@@ -74,8 +72,6 @@ export default function HomePage() {
 
   const handleSelectCity = useCallback((city: City) => {
     setSelectedCity(city);
-    setShowLandmarks(false);
-    setShowRestaurants(false);
     setMapCenterOverride(null);
   }, []);
 
@@ -83,12 +79,6 @@ export default function HomePage() {
     switch (action) {
       case "toggle-satellite":
         setIsSatelliteView((prev) => !prev);
-        break;
-      case "toggle-landmarks":
-        setShowLandmarks((prev) => !prev);
-        break;
-      case "toggle-restaurants":
-        setShowRestaurants((prev) => !prev);
         break;
       case "itinerary":
         setIsItineraryOpen(true);
@@ -133,8 +123,6 @@ export default function HomePage() {
         isItineraryOpen={isItineraryOpen}
         onCloseItinerary={() => setIsItineraryOpen(false)}
         isSatelliteView={isSatelliteView}
-        showLandmarks={showLandmarks}
-        showRestaurants={showRestaurants}
         highlightedLocation={mapCenterOverride}
         onMapLoad={handleMapLoad}
         onMapIdle={handleMapIdle}
@@ -148,8 +136,6 @@ export default function HomePage() {
         onPlaceNavigate={handlePlaceNavigate}
         mapBounds={mapBounds}
         isSatelliteView={isSatelliteView}
-        showLandmarks={showLandmarks}
-        showRestaurants={showRestaurants}
       />
 
       <SurpriseMe

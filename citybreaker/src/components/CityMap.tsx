@@ -46,7 +46,6 @@ interface PlaceResultWithSummary extends google.maps.places.PlaceResult {
 interface CityMapProps {
   center: { lat: number; lng: number; zoom: number; name: string };
   selectedCityName: string;
-  tripLength?: number;
   onPlacesLoaded?: (photoUrls: string[]) => void;
   isItineraryOpen: boolean;
   onCloseItinerary: () => void;
@@ -90,7 +89,6 @@ function useAnimatedPanel(
 export default function CityMap({
   center,
   selectedCityName,
-  tripLength = 3,
   onPlacesLoaded,
   isItineraryOpen,
   onCloseItinerary,
