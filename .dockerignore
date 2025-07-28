@@ -53,3 +53,6 @@ __pycache__/
 
 # Docker compose override (if local-only)
 docker-compose.override.yml
+
+*.ipynb
+.ipynb_checkpoints/

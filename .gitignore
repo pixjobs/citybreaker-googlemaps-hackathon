@@ -69,3 +69,6 @@ docker-compose.override.yml
 *.bak
 *.tmp
 *.log
+
+.ipynb_checkpoints
+*.ipynb
