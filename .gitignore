@@ -1,0 +1,71 @@
+# Node modules
+node_modules/
+
+# Next.js build output
+.next/
+out/
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Runtime
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Mac & system junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+
+# OS-specific
+desktop.ini
+
+# Python-related (if using notebooks etc)
+*.ipynb
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Editor/IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Optional: lockfiles (pick your package manager and comment out others)
+package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Optional: Static analysis
+coverage/
+.nyc_output/
+*.lcov
+
+# Optional: Storybook
+storybook-static/
+
+# Optional: Docker
+*.tar
+*.pid
+docker-compose.override.yml
+
+# Optional: generated PDFs or files
+*.pdf
+
+# Optional: local debug files
+*.local.*
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
