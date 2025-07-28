@@ -126,7 +126,7 @@ async function generateItineraryJson(places: EnrichedPlace[], days: number, city
     const data = JSON.parse(responseText);
     return data.itinerary || [];
   } catch (e) {
-    console.error("Failed to parse Gemini JSON for itinerary:", responseText);
+    console.error("Failed to parse Gemini JSON for itinerary:", responseText, "\nError:", e);
     throw new Error("Could not generate a valid itinerary structure.");
   }
 }
@@ -157,7 +157,7 @@ async function generateCityGuideJson(city: string): Promise<CityGuide> {
         const data = JSON.parse(responseText);
         return data.guide;
     } catch (e) {
-        console.error("Failed to parse Gemini JSON for city guide:", responseText);
+        console.error("Failed to parse Gemini JSON for city guide:", responseText, "\nError:", e);
         // Provide a fallback structure
         return {
             airportTransport: { title: "Arrival & Airport Transit", content: "Information currently unavailable." },
