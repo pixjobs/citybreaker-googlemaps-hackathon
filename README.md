@@ -76,30 +76,6 @@ CityBreaker uses a modern and highly interactive tech stack designed for perform
 
 ---
 
-## ⚙️ Getting Started (Local Dev)
-
-To run locally:
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/your-username/citybreaker.git
-cd citybreaker
-
-# 2. Install dependencies
-npm install
-
-# 3. Add environment variables
-# Create a `.env.local` file with:
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="YOUR_GOOGLE_MAPS_API_KEY"
-GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
-
-# 4. Start the dev server
-npm run dev
-```
-
-Visit [http://localhost:3000](http://localhost:3000) in your browser.
-
----
 
 ## 🚧 Challenges We Faced
 
