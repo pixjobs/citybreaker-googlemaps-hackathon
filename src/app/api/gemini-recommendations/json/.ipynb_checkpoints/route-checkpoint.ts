@@ -132,8 +132,17 @@ async function enrichPlaces(places: IncomingPlace[], apiKey: string | null): Pro
 
 
 function extractJsonFromString(text: string): string | null {
-    const match = text.match(/\{[\s\S]*\}/);
-    return match ? match[0] : null;
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+
+  const jsonCandidate = text.slice(firstBrace, lastBrace + 1);
+  try {
+    JSON.parse(jsonCandidate); // validate
+    return jsonCandidate;
+  } catch {
+    return null;
+  }
 }
 
 async function generateItineraryJson(geminiKey: string, places: EnrichedPlace[], days: number, cityName: string): Promise<ItineraryDay[]> {

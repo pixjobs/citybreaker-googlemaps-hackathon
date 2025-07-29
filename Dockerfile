@@ -3,6 +3,23 @@
 # ==============================================================================
 FROM node:20-alpine AS builder
 
+# Install dependencies required to build and run Puppeteer with Chromium
+RUN apk add --no-cache \
+    bash \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    nodejs \
+    yarn \
+    udev \
+    dumb-init \
+    curl \
+    && rm -rf /var/cache/*
+
 # Set working directory
 WORKDIR /app
 
@@ -22,6 +39,21 @@ RUN npm run build
 # STAGE 2: Runner - Create the final, optimized production image
 # ==============================================================================
 FROM node:20-alpine AS runner
+
+# Install Chromium runtime dependencies
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    dumb-init \
+    udev \
+    && rm -rf /var/cache/*
+
+# Set Puppeteer to use system-installed Chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 

@@ -108,16 +108,18 @@ const ActivityCard: React.FC<{
 				<h4 className="font-serif text-lg font-bold text-amber-300 sm:text-xl">
 					{activity.title}
 				</h4>
-				{place?.location && (
-					<button
-						onClick={() => onZoomToLocation(place.location!)}
-						className="flex-shrink-0 items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-1.5 text-xs font-semibold text-blue-400 transition-colors hover:bg-blue-500/20"
-						title={`View ${activity.placeName} on the map`}
-					>
-						<MapPin size={14} />
-						Map
-					</button>
-				)}
+				{place?.location &&
+                  typeof place.location.lat === "number" &&
+                  typeof place.location.lng === "number" && (
+                    <button
+                      onClick={() => onZoomToLocation(place.location)}
+                      className="flex-shrink-0 items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-1.5 text-xs font-semibold text-blue-400 transition-colors hover:bg-blue-500/20"
+                      title={`View ${activity.placeName} on the map`}
+                    >
+                      <MapPin size={14} />
+                      Map
+                    </button>
+                )}
 			</div>
 			<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400 sm:text-sm">
 				<span className="flex items-center gap-1.5">
@@ -394,28 +396,30 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
 					<h2 className="header-element absolute left-1/2 hidden -translate-x-1/2 font-serif text-lg text-white md:block">
 						Your <span className="text-amber-300">{safeCityName}</span> Itinerary
 					</h2>
-					<div className="flex items-center gap-2">
-						<button
-							onClick={generateExtendedItineraryPDF}
-							disabled={isLoading || !hasData}
-							className="header-element rounded-full p-2 text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-white disabled:opacity-50"
-							aria-label="Generate extended itinerary"
-							title="Generate extended itinerary"
-						>
-							{pdfLoading ? (
-								<div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-							) : (
-								<Sparkles size={20} />
-							)}
-						</button>
-						<button
-							onClick={onClose}
-							className="header-element rounded-full p-2 text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-white"
-							aria-label="Close itinerary panel"
-						>
-							<X size={24} />
-						</button>
-					</div>
+                    <div className="flex items-center gap-2">
+                      {hasData && !panelLoading && (
+                        <button
+                          onClick={generateExtendedItineraryPDF}
+                          disabled={pdfLoading}
+                          className="header-element rounded-full bg-gradient-to-r from-purple-500 to-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-transform hover:scale-105 hover:shadow-lg disabled:opacity-60 disabled:pointer-events-none"
+                          aria-label="Generate Premium Itinerary"
+                        >
+                          {pdfLoading ? (
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          ) : (
+                            "Generate Premium PDF Itinerary"
+                          )}
+                        </button>
+                      )}
+                      <button
+                        onClick={onClose}
+                        className="header-element rounded-full p-2 text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-white"
+                        aria-label="Close itinerary panel"
+                      >
+                        <X size={24} />
+                      </button>
+                    </div>
+
 				</header>
 
 				<main className="flex-grow overflow-y-auto p-3 sm:p-4 lg:p-6">
