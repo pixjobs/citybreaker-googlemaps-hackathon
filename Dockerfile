@@ -1,31 +1,44 @@
-# Stage 1: Builder
-FROM node:18 AS builder
+# ==============================================================================
+# STAGE 1: Builder - Install dependencies and build the Next.js app
+# ==============================================================================
+FROM node:20-alpine AS builder
 
+# Set working directory
 WORKDIR /app
 
-COPY package*.json ./
+# Copy dependency manifests
+COPY package.json package-lock.json ./
+
+# Install dependencies
 RUN npm install
 
+# Copy the rest of the application source code
 COPY . .
 
-# Make sure this is present
-# and your next.config.js has `output: 'standalone'`
+# Build the Next.js application
 RUN npm run build
 
-# Stage 2: Production
-FROM node:18 AS runner
-
-# Use a non-root user
-RUN adduser --system --uid 1001 nextjs
-USER nextjs
+# ==============================================================================
+# STAGE 2: Runner - Create the final, optimized production image
+# ==============================================================================
+FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Copy necessary output only
-COPY --from=builder /app/public ./public
+# Create a non-root user and group named 'nextjs' with UID/GID 1001
+RUN addgroup -g 1001 nextjs && adduser -S -u 1001 -G nextjs nextjs
+
+# Copy build artifacts from builder stage with correct ownership
+COPY --from=builder --chown=nextjs:nextjs /app/public ./public
 COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
-COPY --from=builder /app/package.json ./package.json
 
-EXPOSE 3000
+# Use the non-root user
+USER nextjs
+
+# Expose the port the app will run on. Cloud Run provides the PORT env var.
+EXPOSE 8080
+ENV PORT 8080
+
+# Start the application
 CMD ["node", "server.js"]
