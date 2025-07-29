@@ -28,6 +28,9 @@ const CITIES: City[] = [
   { name: "Seoul", timezone: "Asia/Seoul", lat: 37.5665, lng: 126.978 },
   { name: "New York", timezone: "America/New_York", lat: 40.7128, lng: -74.006 },
   { name: "San Francisco", timezone: "America/Los_Angeles", lat: 37.7749, lng: -122.4194 },
+  { name: "Shanghai", timezone: "Asia/Shanghai", lat: 31.2304, lng: 121.4737 },
+  { name: "Ningbo", timezone: "Asia/Shanghai", lat: 29.8683, lng: 121.544 },
+  { name: "Nantong", timezone: "Asia/Shanghai", lat: 31.9802, lng: 120.8943 },
 ];
 
 const COUNTRY_COLORS: Record<string, string> = {

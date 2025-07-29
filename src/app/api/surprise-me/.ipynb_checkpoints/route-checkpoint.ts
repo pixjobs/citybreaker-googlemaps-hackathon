@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
         const geminiPrompt = `
           For the place "${details.name}" in ${city.name}, act as a witty travel guide for a user who chose the prompt "${prompt}".
           Respond with ONLY a valid JSON object with three keys:
-          1. "description": A short, thrilling, one-paragraph suggestion. Make it sound like an adventure.
+          1. "description": A short, thrilling, one-paragraph suggestion. Make it sound like an adventure. Limit to 20 words.
           2. "whyWorthIt": A single, compelling sentence explaining why this place is worth the user’s time.
           3. "transportInfo": A single sentence with practical advice on the most convenient transport (e.g., "Best reached by taxi", "A short walk from the central metro station", "Take the number 12 bus").
           
