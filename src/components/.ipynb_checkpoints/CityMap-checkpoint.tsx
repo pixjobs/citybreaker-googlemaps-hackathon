@@ -133,12 +133,13 @@ export default function CityMap({
 
       setSelectedPlaceBasic({ name: place.displayName || "Unnamed Place", address: place.formattedAddress || "No address available", photoUrl: place.photos?.[0]?.getURI(), });
       
-      setSelectedPlaceDetails({
-          website: place.websiteURI?.toString(),
-          rating: place.rating ?? undefined,
-          reviews: validReviews,
-          editorialSummary: place.editorialSummary ?? undefined,
-        });
+    setSelectedPlaceDetails({
+      place_id: place.id, 
+      website: place.websiteURI?.toString(),
+      rating: place.rating ?? undefined,
+      reviews: validReviews,
+      editorialSummary: place.editorialSummary ?? undefined,
+    });
 
       const res = await fetch("/api/youtube-search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: place.displayName }) });
       const data = await res.json();

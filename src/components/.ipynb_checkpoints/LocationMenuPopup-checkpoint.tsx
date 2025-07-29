@@ -15,10 +15,11 @@ export interface Review {
 }
 
 export interface RichPlaceDetails {
+  place_id?: string;
   website?: string;
   rating?: number;
   reviews?: Review[];
-  editorialSummary?: string;
+  editorialSummary?: { overview?: string }; // updated type
 }
 
 export interface YouTubeVideo {
@@ -40,7 +41,6 @@ interface LocationMenuPopupProps {
   setActiveTab: (tab: "info" | "reviews" | "videos") => void;
 }
 
-// --- SUB-COMPONENTS ---
 const StarRating = ({ rating }: { rating: number }) => (
   <div className="flex items-center gap-1">
     {[...Array(5)].map((_, i) => (
@@ -121,7 +121,6 @@ const VideoCard = ({ video }: { video: YouTubeVideo }) => (
   </motion.li>
 );
 
-// --- MAIN COMPONENT ---
 export default function LocationMenuPopup({
   isOpen,
   onClose,
@@ -157,24 +156,32 @@ export default function LocationMenuPopup({
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <button className="absolute top-4 right-4 text-white/50 hover:text-white transition-colors z-10" onClick={onClose} aria-label="Close">
+            <button
+              className="absolute top-4 right-4 text-white/50 hover:text-white transition-colors z-10"
+              onClick={onClose}
+              aria-label="Close"
+            >
               <X size={24} />
             </button>
 
             {place && (
               <div className="mb-4 pr-8">
-                <motion.h2 layoutId={`place-title-${place.name}`} className="text-2xl font-bold text-yellow-300">{place.name}</motion.h2>
+                <motion.h2 layoutId={`place-title-${place.name}`} className="text-2xl font-bold text-yellow-300">
+                  {place.name}
+                </motion.h2>
                 <p className="text-sm text-white/50">{place.address}</p>
               </div>
             )}
 
             <div className="relative flex border-b border-white/10 mb-4">
-              {tabs.map(tab => (
+              {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   disabled={tab.disabled}
-                  className={`relative flex items-center gap-2 px-4 py-2 text-sm font-semibold transition rounded-t-md outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 ${activeTab === tab.id ? "text-white" : "text-white/50 hover:text-white"} disabled:text-white/20`}
+                  className={`relative flex items-center gap-2 px-4 py-2 text-sm font-semibold transition rounded-t-md outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 ${
+                    activeTab === tab.id ? "text-white" : "text-white/50 hover:text-white"
+                  } disabled:text-white/20`}
                 >
                   {tab.icon}
                   {tab.label}
@@ -202,20 +209,21 @@ export default function LocationMenuPopup({
                         {place?.photoUrl && (
                           <div className="relative w-full h-48 rounded-xl overflow-hidden">
                             <Image
-                              src={place.photoUrl}
+                              src={`/api/proxy-photo?placeid=${details.place_id}`}
                               alt={place.name}
                               fill
                               sizes="100vw"
                               className="object-cover"
                               priority
+                              unoptimized
                             />
                           </div>
                         )}
                         {details?.rating && <StarRating rating={details.rating} />}
-                        {details?.editorialSummary && (
+                        {details?.editorialSummary?.overview && (
                           <div>
                             <h4 className="font-bold text-white mb-1">About this place</h4>
-                            <p className="text-sm text-white/70 leading-relaxed">{details.editorialSummary}</p>
+                            <p className="text-sm text-white/70 leading-relaxed">{details.editorialSummary.overview}</p>
                           </div>
                         )}
                         {details?.website && (
@@ -236,9 +244,7 @@ export default function LocationMenuPopup({
                     {activeTab === "reviews" && (
                       <ul className="space-y-3">
                         {details?.reviews && details.reviews.length > 0 ? (
-                          details.reviews.map((review, idx) => (
-                            <ReviewCard key={idx} review={review} />
-                          ))
+                          details.reviews.map((review, idx) => <ReviewCard key={idx} review={review} />)
                         ) : (
                           <li className="text-sm text-white/60 italic text-center pt-8">No reviews available.</li>
                         )}
