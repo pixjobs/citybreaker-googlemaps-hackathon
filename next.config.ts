@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   images: {
     remotePatterns: [
       {
@@ -27,7 +28,6 @@ const nextConfig: NextConfig = {
         port: "",
         pathname: "/**",
       },
-      // ADDED: Allow images from Unsplash for the fallback photo
       {
         protocol: "https",
         hostname: "images.unsplash.com",
