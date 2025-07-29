@@ -38,9 +38,7 @@ interface AnimatedHeaderBoardProps {
   cities: City[];
   onSelectCity: (city: City) => void;
   onMenuAction: (action: string) => void;
-  // ✅ FIX: Update the type to accept the modern `Place` object from the new API.
-  // Using a union type provides maximum safety and compatibility.
-  onPlaceNavigate: (place: google.maps.places.Place | google.maps.places.PlaceResult) => void;
+  onPlaceNavigate: (place: google.maps.places.Place) => void;
   mapBounds: google.maps.LatLngBounds | null;
   isSatelliteView: boolean;
 }

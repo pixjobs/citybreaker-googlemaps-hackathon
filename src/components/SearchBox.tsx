@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Search, MapPin } from "lucide-react";
-import { useMaps } from "./providers/MapsProvider";
 import gsap from "gsap";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -15,7 +14,6 @@ interface SearchBoxProps {
 
 // --- COMPONENT ---
 export default function SearchBox({ mapBounds, onPlaceNavigate }: SearchBoxProps) {
-  const { isLoaded } = useMaps();
   const [query, setQuery] = useState("");
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isFocused, setIsFocused] = useState(false);
@@ -25,7 +23,6 @@ export default function SearchBox({ mapBounds, onPlaceNavigate }: SearchBoxProps
   // This is now the SINGLE source of truth for handling searches and location changes.
   useEffect(() => {
     const controller = new AbortController();
-    const { signal } = controller;
 
     const hasBoundsChanged = mapBounds && prevMapBoundsRef.current && !prevMapBoundsRef.current.equals(mapBounds);
 
@@ -51,22 +48,21 @@ export default function SearchBox({ mapBounds, onPlaceNavigate }: SearchBoxProps
     // This is the only case where we perform a search.
     const handler = setTimeout(() => {
       (async () => {
-        const request = {
+        const request: google.maps.places.SearchByTextRequest = {
           textQuery: query,
           fields: ["id", "displayName", "formattedAddress"],
           locationBias: mapBounds,
         };
+    
         try {
-          const { places } = await google.maps.places.Place.searchByText(request, { signal });
-          setPredictions(places || []);
+          const { places } = await google.maps.places.Place.searchByText(request);
+          setPredictions(places ?? []);
         } catch (error) {
-          if ((error as Error).name !== 'AbortError') {
-            console.error("Place search failed:", error);
-          }
+          console.error("Place search failed:", error);
         }
       })();
     }, 300); // Debounce
-
+      
     return () => {
       clearTimeout(handler);
       controller.abort();

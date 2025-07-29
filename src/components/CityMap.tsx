@@ -6,6 +6,7 @@ import ItineraryPanel from "./ItineraryPanel";
 import LocationMenuPopup, {
   RichPlaceDetails,
   YouTubeVideo,
+  Review,
 } from "./LocationMenuPopup";
 import { useMaps } from "./providers/MapsProvider";
 
@@ -34,11 +35,6 @@ interface PlacePhotoInfo {
   photoUrl?: string;
 }
 
-interface PlaceEditorialSummary {
-  language?: string;
-  overview?: string;
-}
-
 interface CityMapProps {
   center: { lat: number; lng: number; zoom: number; name:string };
   selectedCityName: string;
@@ -49,8 +45,7 @@ interface CityMapProps {
   highlightedLocation?: { lat: number; lng: number } | null;
   onMapLoad?: (map: google.maps.Map) => void;
   onMapIdle?: () => void;
-  // This prop is no longer needed from the parent.
-  // onZoomToLocation: (location: { lat: number; lng: number }) => void;
+  onZoomToLocation: (location: { lat: number; lng: number }) => void;
 }
 
 function useAnimatedPanel(panelRef: React.RefObject<HTMLDivElement | null>, isOpen: boolean) {
@@ -124,9 +119,26 @@ export default function CityMap({
 
       if (place.location) mapRef.current?.panTo(place.location);
       
-      const validReviews = place.reviews?.filter((r): r is google.maps.places.PlaceReview & { rating: number } => typeof r.rating === "number");
+    const validReviews: Review[] = place.reviews
+      ? place.reviews
+          .filter(apiReview => typeof apiReview.rating === "number")
+          .map(apiReview => ({
+            author_name: apiReview.authorAttribution?.displayName || "Anonymous",
+            rating: apiReview.rating!,
+            relative_time_description: apiReview.relativePublishTimeDescription || "",
+            text: apiReview.text || "",
+            profile_photo_url: apiReview.authorAttribution?.photoURI || "/default-avatar.png", // fallback image
+          }))
+      : [];
+
       setSelectedPlaceBasic({ name: place.displayName || "Unnamed Place", address: place.formattedAddress || "No address available", photoUrl: place.photos?.[0]?.getURI(), });
-      setSelectedPlaceDetails({ website: place.websiteURI, rating: place.rating, reviews: validReviews, editorial_summary: place.editorialSummary as PlaceEditorialSummary, });
+      
+      setSelectedPlaceDetails({
+          website: place.websiteURI?.toString(),
+          rating: place.rating ?? undefined,
+          reviews: validReviews,
+          editorialSummary: place.editorialSummary ?? undefined,
+        });
 
       const res = await fetch("/api/youtube-search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: place.displayName }) });
       const data = await res.json();
@@ -141,15 +153,13 @@ export default function CityMap({
     }
   }, [isLoaded]);
   
-  // ✅ THIS IS NOW THE SINGLE SOURCE OF TRUTH FOR ZOOMING FROM THE ITINERARY
   const handleZoomToLocation = useCallback((location: { lat: number; lng: number }) => {
     if (mapRef.current) {
       mapRef.current.panTo(location);
-      mapRef.current.setZoom(17); // Set a closer zoom for specific locations
+      mapRef.current.setZoom(17);
     }
-    // We also close the itinerary panel for a better user experience.
     onCloseItinerary();
-  }, [onCloseItinerary]); // Depends on onCloseItinerary to avoid stale closures.
+  }, [onCloseItinerary]);
 
   useEffect(() => {
     if (!isLoaded || mapRef.current) return;
@@ -252,7 +262,6 @@ export default function CityMap({
       <LocationMenuPopup isOpen={isPopupOpen} onClose={() => setIsPopupOpen(false)} place={selectedPlaceBasic} details={selectedPlaceDetails} youtubeVideos={youtubeVideos} isLoading={isDetailsLoading} isVideosLoading={isVideosLoading} activeTab={activeTab} setActiveTab={setActiveTab} />
       <div ref={panelRef} className="fixed inset-0 z-20 opacity-0 pointer-events-none" style={{ transform: "translateY(100%)" }}>
         {shouldOpenItinerary && (
-            // ✅ THIS NOW RECEIVES THE CORRECT FUNCTION
             <ItineraryPanel
                 cityName={selectedCityName}
                 places={placePhotos}

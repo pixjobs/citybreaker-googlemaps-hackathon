@@ -10,8 +10,7 @@ import React, {
 import { saveAs } from "file-saver";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
-import { X } from "lucide-react"; // ✅ REFINED: Sparkles has been removed.
-import ReactMarkdown from "react-markdown";
+import { X } from "lucide-react"; 
 import Image from "next/image";
 
 import ActivityCard from "./ActivityCard";

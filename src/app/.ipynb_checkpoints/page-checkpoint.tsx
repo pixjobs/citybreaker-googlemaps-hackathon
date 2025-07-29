@@ -60,21 +60,16 @@ export default function HomePage() {
       : { lat: selectedCity.lat, lng: selectedCity.lng, zoom: 14, name: selectedCity.name }
   ), [selectedCity, mapCenterOverride]);
 
-
   const handlePlaceNavigate = useCallback((place: google.maps.places.Place) => {
     if (!map) return;
-
-    // The modern Place object has .viewport and .location directly on it.
-    // We prioritize using the viewport if it exists, as it provides a better view.
     if (place.viewport) {
       map.fitBounds(place.viewport);
     } else if (place.location) {
-      // As a fallback for specific points, we center and zoom in.
       map.setCenter(place.location);
-      map.setZoom(17); // A good zoom level for a specific address.
+      map.setZoom(19);
     }
   }, [map]);
-    
+
   const handleSelectCity = useCallback((city: City) => {
     setSelectedCity(city);
     setMapCenterOverride(null);
@@ -96,7 +91,8 @@ export default function HomePage() {
         break;
     }
   }, []);
-
+  
+  // ✅ FIX: This function is RESTORED because the SurpriseMe component needs it.
   const handleZoomToLocation = useCallback((loc: { lat: number; lng: number }) => {
     setMapCenterOverride(loc);
   }, []);

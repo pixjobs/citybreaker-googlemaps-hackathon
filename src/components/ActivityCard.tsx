@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import { MapPin, Pin, Star, Users, Wallet } from "lucide-react";
@@ -35,18 +36,21 @@ interface ActivityCardProps {
 const ActivityCard: React.FC<ActivityCardProps> = ({ activity, place, onZoomToLocation }) => (
   <div className="activity-card flex flex-col overflow-hidden rounded-xl border border-neutral-700/60 bg-neutral-800/50 shadow-lg sm:flex-row">
     <div className="relative h-40 w-full flex-shrink-0 sm:h-auto sm:w-1/3">
-      {place?.photoUrl ? (
-        <img
-          src={place.photoUrl}
-          alt={activity.title.replace(/"/g, "'")}
-          className="absolute h-full w-full object-cover"
-          loading="lazy"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-neutral-800">
-          <Pin className="text-neutral-600" size={32} />
-        </div>
-      )}
+        {place?.photoUrl ? (
+          <Image
+            src={place.photoUrl}
+            alt={activity.title.replace(/"/g, "'")}
+            fill
+            className="object-cover"
+            sizes="(max-width: 768px) 100vw, 33vw"
+            priority={false}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-neutral-800">
+            <Pin className="text-neutral-600" size={32} />
+          </div>
+        )}
+
     </div>
 
     <div className="flex w-full flex-col p-4 sm:p-5">
