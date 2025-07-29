@@ -1,42 +1,51 @@
-# Stage 1: Build the application
+# ==============================================================================
+# STAGE 1: Builder - Install dependencies and build the Next.js app
+# ==============================================================================
 FROM node:20-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+# Copy dependency manifests
 COPY package.json package-lock.json ./
 
 # Install dependencies
-RUN npm ci --verbose
+RUN npm install
 
-# Copy all application files to the container
+# Copy the rest of the application source code
 COPY . .
 
-# Build the application
+# Build the Next.js application
+# This will also generate the 'standalone' output due to the next.config.js setting
 RUN npm run build
 
-# Remove development dependencies to reduce image size
-RUN rm -rf node_modules
-
-# Stage 2: Run the application
+# ==============================================================================
+# STAGE 2: Runner - Create the final, optimized production image
+# ==============================================================================
 FROM node:20-alpine AS runner
 
-# Set working directory
 WORKDIR /app
 
-# Set environment variables
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=8080
+# Create a non-root user 'nextjs' for security
+# This user will own the application files and run the process
+RUN addgroup --system --gid 1001 nextjs
+RUN adduser --system --uid 1001 nextjs
 
 # Copy the standalone output from the builder stage
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+# This includes the server, public assets, and static files
 COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
 
-# Expose the port
+# Switch to the non-root user
+USER nextjs
+
+# Expose the port the app will run on. Cloud Run provides the PORT env var.
 EXPOSE 8080
 
-# Run the standalone server
+# Set the default port environment variable
+ENV PORT 8080
+
+# This is the command that will be executed to start the application server
+# It uses the custom Node.js server from the standalone output
 CMD ["node", "server.js"]

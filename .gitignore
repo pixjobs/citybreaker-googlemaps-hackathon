@@ -42,7 +42,7 @@ __pycache__/
 *.sublime-workspace
 
 # Optional: lockfiles (pick your package manager and comment out others)
-package-lock.json
+#package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
 
