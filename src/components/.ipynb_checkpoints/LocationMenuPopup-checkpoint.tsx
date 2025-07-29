@@ -19,7 +19,7 @@ export interface RichPlaceDetails {
   website?: string;
   rating?: number;
   reviews?: Review[];
-  editorialSummary?: { overview?: string }; // updated type
+  editorialSummary?: { overview?: string };
 }
 
 export interface YouTubeVideo {
@@ -206,7 +206,7 @@ export default function LocationMenuPopup({
                   >
                     {activeTab === "info" && (
                       <div className="space-y-4">
-                        {place?.photoUrl && (
+                        {place?.name && details?.place_id && (
                           <div className="relative w-full h-48 rounded-xl overflow-hidden">
                             <Image
                               src={`/api/proxy-photo?placeid=${details.place_id}`}
@@ -215,7 +215,6 @@ export default function LocationMenuPopup({
                               sizes="100vw"
                               className="object-cover"
                               priority
-                              unoptimized
                             />
                           </div>
                         )}

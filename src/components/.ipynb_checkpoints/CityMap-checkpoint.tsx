@@ -138,7 +138,12 @@ export default function CityMap({
       website: place.websiteURI?.toString(),
       rating: place.rating ?? undefined,
       reviews: validReviews,
-      editorialSummary: place.editorialSummary ?? undefined,
+      editorialSummary:
+          typeof place.editorialSummary === 'object' &&
+          place.editorialSummary !== null &&
+          'overview' in place.editorialSummary
+            ? (place.editorialSummary as { overview?: string })
+            : undefined,
     });
 
       const res = await fetch("/api/youtube-search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: place.displayName }) });
