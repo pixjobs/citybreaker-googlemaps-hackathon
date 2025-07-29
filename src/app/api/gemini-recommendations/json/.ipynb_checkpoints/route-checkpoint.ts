@@ -4,15 +4,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 
+// --- SECRET AND MODEL CONFIGURATION ---
 const GEMINI_SECRET_NAME = 'projects/934477100130/secrets/gemini-api-key/versions/latest';
-const MAPS_SECRET_NAME = 'projects/934477100130/secrets/maps-api-key/versions/latest';
-const MAPS_TEXT_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
-const MAPS_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
-const MAPS_PHOTO_BASE_URL = 'https://maps.googleapis.com/maps/api/place/photo';
-const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+const MAPS_SECRET_NAME = 'projects/934477100130/secrets/places-api-key/versions/latest';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite'; 
+
+// --- NEW PLACES API ENDPOINTS ---
+const PLACES_SEARCH_TEXT_URL = 'https://places.googleapis.com/v1/places:searchText';
+const PLACES_PHOTO_BASE_URL = 'https://places.googleapis.com/v1';
+
+// --- TRIP CONSTRAINTS ---
 const MAX_TRIP_DAYS = 7;
 const MIN_TRIP_DAYS = 3;
 
+// --- TYPE DEFINITIONS ---
 interface IncomingPlace { name: string; }
 interface EnrichedPlace {
   name: string;
@@ -24,13 +29,16 @@ interface EnrichedPlace {
 }
 interface ItineraryActivity { title: string; description: string; whyVisit: string; insiderTip: string; priceRange: string; audience: string; placeName: string; }
 interface GeminiItineraryDay { title: string; dayPhotoSuggestion: string; activities: ItineraryActivity[]; }
-interface ItineraryDay { title: string; dayPhotoUrl?: string; activities: ItineraryActivity[]; }
+interface ItineraryDay { title: string; dayPhotoUrl?: string; activities: EnrichedPlace[]; }
 interface RequestBody { places?: IncomingPlace[]; tripLength?: number; cityName?: string; }
 
+// --- CACHING ---
 let cachedGeminiKey: string | null = null;
 let cachedMapsKey: string | null = null;
 let cachedGeminiClient: GoogleGenerativeAI | null = null;
 let secretManagerClient: SecretManagerServiceClient | null = null;
+
+// --- HELPER FUNCTIONS ---
 
 async function getSecretManagerClient(): Promise<SecretManagerServiceClient> {
   if (!secretManagerClient) secretManagerClient = new SecretManagerServiceClient();
@@ -53,47 +61,75 @@ async function getSecret(secretName: string): Promise<string | null> {
   }
 }
 
+/**
+ * [FIXED] This function is updated to use the new Places API (v1).
+ * It now makes a single, more efficient API call per place.
+ */
 async function enrichPlaces(places: IncomingPlace[], apiKey: string | null): Promise<EnrichedPlace[]> {
   if (!apiKey) {
     console.warn('Maps API key is missing. Proceeding without place enrichment.');
     return places.map((p: IncomingPlace) => ({ name: p?.name || 'Unknown Place' }));
   }
+
   const enrichedPromises = places.map(async (place) => {
     const name = place?.name?.trim();
     if (!name) return { name: 'Unnamed Place' };
+
     try {
-      const searchUrl = `${MAPS_TEXT_SEARCH_URL}?query=${encodeURIComponent(name)}&key=${apiKey}`;
-      const searchRes = await fetch(searchUrl);
-      if (!searchRes.ok) throw new Error(`TextSearch API error: ${searchRes.status}`);
+      // The new API uses a POST request with the query in the body
+      const requestBody = { textQuery: name };
+      
+      // Headers are used for the API key and to specify which fields we want back.
+      // This 'field mask' is what allows us to get all data in one call.
+      const requestHeaders = {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.websiteUri,places.googleMapsUri,places.location,places.photos',
+      };
+
+      const searchRes = await fetch(PLACES_SEARCH_TEXT_URL, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!searchRes.ok) {
+        const errorBody = await searchRes.text();
+        throw new Error(`Places API searchText error: ${searchRes.status}. Body: ${errorBody}`);
+      }
+
       const searchJson = await searchRes.json();
-      const firstResult = searchJson.results?.[0];
-      const placeId = firstResult?.place_id;
-      if (!placeId) {
-        console.warn(`No results for "${name}"`);
+      const firstResult = searchJson.places?.[0];
+      
+      if (!firstResult) {
+        console.warn(`No results for "${name}" from the new Places API.`);
         return { name };
       }
-      const detailsUrl = `${MAPS_DETAILS_URL}?place_id=${placeId}&fields=photos,website,url,geometry,place_id&key=${apiKey}`;
-      const detailsRes = await fetch(detailsUrl);
-      if (!detailsRes.ok) throw new Error(`Details API error: ${detailsRes.status}`);
-      const detailsJson = await detailsRes.json();
-      const result = detailsJson.result;
-      const photoRef = result?.photos?.[0]?.photo_reference;
-      const photoUrl = photoRef ? `${MAPS_PHOTO_BASE_URL}?maxwidth=800&photo_reference=${photoRef}&key=${apiKey}` : undefined;
+      
+      // The new photo reference is a full resource name.
+      const photoName = firstResult.photos?.[0]?.name;
+      // The photo URL must be constructed differently.
+      const photoUrl = photoName 
+        ? `${PLACES_PHOTO_BASE_URL}/${photoName}/media?key=${apiKey}&maxHeightPx=800` 
+        : undefined;
+
       return {
-          name,
-          placeId,
+          name: firstResult.displayName?.text || name, // Use the display name from Google
+          placeId: firstResult.id,
           photoUrl,
-          website: result?.website,
-          googleMapsUrl: result?.url,
-          location: result?.geometry?.location,
+          website: firstResult.websiteUri,
+          googleMapsUrl: firstResult.googleMapsUri,
+          location: firstResult.location,
       };
     } catch (error) {
       console.error(`Error enriching place "${name}":`, error);
-      return { name };
+      return { name }; // Return the original name on failure
     }
   });
+
   return Promise.all(enrichedPromises);
 }
+
 
 function extractJsonFromString(text: string): string | null {
     const match = text.match(/\{[\s\S]*\}/);
@@ -131,10 +167,27 @@ async function generateItineraryJson(geminiKey: string, places: EnrichedPlace[],
     const data = JSON.parse(cleanJsonString);
     return (data.itinerary || []).map((day: GeminiItineraryDay) => {
         const suggestedPlaceName = day.dayPhotoSuggestion?.toLowerCase();
+        // Find the enriched place details for the photo suggestion
         const photoPlace = places.find(p => p.name.toLowerCase() === suggestedPlaceName);
+        
+        // Map activities and enrich them with full place data
+        const enrichedActivities = day.activities.map(activity => {
+            const activityPlace = places.find(p => p.name === activity.placeName);
+            return {
+                ...activity,
+                ...(activityPlace && { // Spread the enriched details into the activity
+                    placeId: activityPlace.placeId,
+                    photoUrl: activityPlace.photoUrl,
+                    website: activityPlace.website,
+                    googleMapsUrl: activityPlace.googleMapsUrl,
+                    location: activityPlace.location,
+                })
+            };
+        });
+
         return {
             title: day.title,
-            activities: day.activities,
+            activities: enrichedActivities,
             dayPhotoUrl: photoPlace?.photoUrl
         };
     });
@@ -147,6 +200,7 @@ async function generateItineraryJson(geminiKey: string, places: EnrichedPlace[],
   }
 }
 
+// --- MAIN API HANDLER ---
 export async function POST(req: NextRequest) {
   let body: RequestBody;
   try {
@@ -157,6 +211,7 @@ export async function POST(req: NextRequest) {
 
   const { places = [], tripLength = 3, cityName = 'CityBreaker' } = body;
 
+  // --- VALIDATION ---
   if (!Array.isArray(places) || !places.length) { return NextResponse.json({ error: 'A non-empty "places" array is required.' }, { status: 400 }); }
   if (typeof cityName !== 'string' || !cityName.trim()) { return NextResponse.json({ error: 'A valid "cityName" is required.' }, { status: 400 }); }
   if (typeof tripLength !== 'number' || tripLength < MIN_TRIP_DAYS) { return NextResponse.json({ error: `"tripLength" must be at least ${MIN_TRIP_DAYS} day(s).` }, { status: 400 }); }
@@ -164,6 +219,7 @@ export async function POST(req: NextRequest) {
   const days = Math.min(Math.max(tripLength, MIN_TRIP_DAYS), MAX_TRIP_DAYS);
 
   try {
+    // --- FETCH SECRETS ---
     if (!cachedGeminiKey) cachedGeminiKey = await getSecret(GEMINI_SECRET_NAME);
     if (!cachedMapsKey) cachedMapsKey = await getSecret(MAPS_SECRET_NAME);
     if (!cachedGeminiKey) {
@@ -171,6 +227,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Server configuration error: Missing Gemini key' }, { status: 500 });
     }
 
+    // --- MAIN LOGIC ---
     const enrichedPlaces = await enrichPlaces(places, cachedMapsKey);
     const itinerary = await generateItineraryJson(cachedGeminiKey, enrichedPlaces, days, cityName);
 
