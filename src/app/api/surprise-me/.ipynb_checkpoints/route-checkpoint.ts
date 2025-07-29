@@ -11,7 +11,7 @@ const config = {
     model: 'gemini-2.5-flash-lite',
   },
   maps: {
-    secretName: 'projects/934477100130/secrets/maps-api-key/versions/latest',
+    secretName: 'projects/934477100130/secrets/places-api-key/versions/latest',
     textSearchUrl: 'https://maps.googleapis.com/maps/api/place/textsearch/json',
     detailsUrl: 'https://maps.googleapis.com/maps/api/place/details/json',
     photoBaseUrl: 'https://maps.googleapis.com/maps/api/place/photo',
