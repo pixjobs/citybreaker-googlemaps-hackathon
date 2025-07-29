@@ -1,76 +1,79 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Search, MapPin } from "lucide-react";
 import { useMaps } from "./providers/MapsProvider";
 import gsap from "gsap";
 import { motion, AnimatePresence } from "framer-motion";
 
-// --- INTERFACE DEFINITIONS ---
-interface AutocompletePrediction {
-  description: string;
-  place_id: string;
-  structured_formatting: { main_text: string; secondary_text: string };
-}
+type Prediction = google.maps.places.Place;
 
 interface SearchBoxProps {
   mapBounds: google.maps.LatLngBounds | null;
-  onPlaceNavigate: (place: google.maps.places.PlaceResult) => void;
+  onPlaceNavigate: (place: google.maps.places.Place) => void;
 }
-
 
 // --- COMPONENT ---
 export default function SearchBox({ mapBounds, onPlaceNavigate }: SearchBoxProps) {
   const { isLoaded } = useMaps();
   const [query, setQuery] = useState("");
-  const [predictions, setPredictions] = useState<AutocompletePrediction[]>([]);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isFocused, setIsFocused] = useState(false);
-  const autocompleteService = useRef<google.maps.places.AutocompleteService | null>(null);
-  const placesService = useRef<google.maps.places.PlacesService | null>(null);
   const searchBoxRef = useRef<HTMLDivElement>(null);
+  const prevMapBoundsRef = useRef<google.maps.LatLngBounds | null>(null);
 
+  // This is now the SINGLE source of truth for handling searches and location changes.
   useEffect(() => {
-    if (isLoaded && !autocompleteService.current) {
-      autocompleteService.current = new window.google.maps.places.AutocompleteService();
-      const dummyDiv = document.createElement('div');
-      placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
-    }
-  }, [isLoaded]);
+    const controller = new AbortController();
+    const { signal } = controller;
 
-  // This effect handles fetching predictions from the Google API
-  useEffect(() => {
-    if (!query || !autocompleteService.current || !mapBounds) {
-      setPredictions([]);
-      return;
+    const hasBoundsChanged = mapBounds && prevMapBoundsRef.current && !prevMapBoundsRef.current.equals(mapBounds);
+
+    // We must always update the ref for the next render cycle.
+    prevMapBoundsRef.current = mapBounds;
+
+    // CASE 1: The map has moved to a new city.
+    // We must clear the old search and STOP, not perform a new one.
+    if (hasBoundsChanged) {
+        setQuery("");
+        setPredictions([]);
+        return; // Exit the effect early.
     }
 
+    // CASE 2: The map is stable, but the user has cleared the input.
+    // Or, there are no bounds yet. Clear predictions and stop.
+    if (!query || !mapBounds) {
+        setPredictions([]);
+        return;
+    }
+
+    // CASE 3: The map is stable and the user is typing.
+    // This is the only case where we perform a search.
     const handler = setTimeout(() => {
-      console.log("🔍 SearchBox: Searching with locationRestriction...", mapBounds.toJSON());
-
-      // ✅ THE MODERN API: Using locationRestriction instead of the deprecated `bounds` and `strictBounds`.
-      const request: google.maps.places.AutocompletionRequest = {
-        input: query,
-        locationRestriction: mapBounds, // This enforces that results MUST be within the map bounds.
-        types: ['geocode', 'establishment'], // Tells the API we're interested in addresses and businesses.
-      };
-
-      autocompleteService.current?.getPlacePredictions(request, (results, status) => {
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
-            console.log(`✅ SearchBox: Found ${results.length} results within restriction.`);
-            setPredictions(results);
-          } else {
-            // This is expected if no results are found within the bounds.
-            console.log(`ℹ️ SearchBox: No results found or status: ${status}`);
-            setPredictions([]);
+      (async () => {
+        const request = {
+          textQuery: query,
+          fields: ["id", "displayName", "formattedAddress"],
+          locationBias: mapBounds,
+        };
+        try {
+          const { places } = await google.maps.places.Place.searchByText(request, { signal });
+          setPredictions(places || []);
+        } catch (error) {
+          if ((error as Error).name !== 'AbortError') {
+            console.error("Place search failed:", error);
           }
         }
-      );
-    }, 300); // Debounce API calls
+      })();
+    }, 300); // Debounce
 
-    return () => clearTimeout(handler);
-  }, [query, mapBounds]);
+    return () => {
+      clearTimeout(handler);
+      controller.abort();
+    };
+  }, [query, mapBounds]); // The effect correctly depends on both query and mapBounds.
 
-  // Effect to handle clicks outside the search box to close the dropdown
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchBoxRef.current && !searchBoxRef.current.contains(event.target as Node)) {
@@ -81,26 +84,24 @@ export default function SearchBox({ mapBounds, onPlaceNavigate }: SearchBoxProps
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleSelect = (placeId: string) => {
-    if (!placesService.current) return;
-    
-    const request = {
-      placeId,
-      fields: ["name", "geometry", "place_id"], 
-    };
-
-    placesService.current.getDetails(request, (place, status) => {
-      if (status === "OK" && place?.geometry) {
+  const handleSelect = useCallback(async (placeId: string) => {
+    if (!placeId) return;
+    const place = new google.maps.places.Place({ id: placeId });
+    try {
+      await place.fetchFields({
+        fields: ["displayName", "id", "location", "viewport"],
+      });
+      if (place.location) {
         onPlaceNavigate(place);
       }
-    });
-
+    } catch (error) {
+      console.error("Failed to fetch place details:", error);
+    }
     setQuery("");
     setPredictions([]);
     setIsFocused(false);
-  };
-  
-  // GSAP animation for list items appearing
+  }, [onPlaceNavigate]);
+
   useEffect(() => {
     if (isFocused && predictions.length > 0) {
       gsap.fromTo(".prediction-item", 
@@ -132,15 +133,15 @@ export default function SearchBox({ mapBounds, onPlaceNavigate }: SearchBoxProps
           >
             <ul className="overflow-y-auto">
               {predictions.map((prediction) => (
-                <li key={prediction.place_id} className="prediction-item border-b border-white/10 last:border-b-0">
+                <li key={prediction.id} className="prediction-item border-b border-white/10 last:border-b-0">
                   <button
-                    onClick={() => handleSelect(prediction.place_id)}
+                    onClick={() => handleSelect(prediction.id!)}
                     className="w-full flex items-start gap-4 px-5 py-4 text-left hover:bg-yellow-600/20 transition-colors"
                   >
                     <div className="mt-1 flex-shrink-0"><MapPin size={20} className="text-yellow-400" /></div>
                     <div>
-                      <p className="text-base font-semibold text-white">{prediction.structured_formatting.main_text}</p>
-                      <p className="text-sm text-white/70">{prediction.structured_formatting.secondary_text}</p>
+                      <p className="text-base font-semibold text-white">{prediction.displayName}</p>
+                      <p className="text-sm text-white/70">{prediction.formattedAddress}</p>
                     </div>
                   </button>
                 </li>

@@ -52,7 +52,7 @@ export default function HomePage() {
   const [cityTime, setCityTime] = useState("--:--");
   const [isSatelliteView, setIsSatelliteView] = useState(false);
 
-  const { map, mapBounds, handleMapLoad, handleMapIdle } = useMapBounds();
+  const { map, mapBounds, selectCity, handleMapLoad, handleMapIdle } = useMapBounds();
 
   const center = useMemo(() => (
     mapCenterOverride
@@ -60,20 +60,28 @@ export default function HomePage() {
       : { lat: selectedCity.lat, lng: selectedCity.lng, zoom: 14, name: selectedCity.name }
   ), [selectedCity, mapCenterOverride]);
 
-  const handlePlaceNavigate = useCallback((place: google.maps.places.PlaceResult) => {
+
+  const handlePlaceNavigate = useCallback((place: google.maps.places.Place) => {
     if (!map) return;
-    if (place.geometry?.viewport) {
-      map.fitBounds(place.geometry.viewport);
-    } else if (place.geometry?.location) {
-      map.setCenter(place.geometry.location);
-      map.setZoom(17);
+
+    // The modern Place object has .viewport and .location directly on it.
+    // We prioritize using the viewport if it exists, as it provides a better view.
+    if (place.viewport) {
+      map.fitBounds(place.viewport);
+    } else if (place.location) {
+      // As a fallback for specific points, we center and zoom in.
+      map.setCenter(place.location);
+      map.setZoom(17); // A good zoom level for a specific address.
     }
   }, [map]);
-
+    
   const handleSelectCity = useCallback((city: City) => {
     setSelectedCity(city);
     setMapCenterOverride(null);
-  }, []);
+    if (selectCity) {
+      selectCity(city);
+    }
+  }, [selectCity]);
 
   const handleMenuAction = useCallback((action: string) => {
     switch (action) {
@@ -118,7 +126,7 @@ export default function HomePage() {
 
       <CityMap
         center={center}
-        selectedCityName={selectedCity.name} // ✅ Pass correct prop to ItineraryPanel
+        selectedCityName={selectedCity.name}
         onPlacesLoaded={() => {}}
         isItineraryOpen={isItineraryOpen}
         onCloseItinerary={() => setIsItineraryOpen(false)}

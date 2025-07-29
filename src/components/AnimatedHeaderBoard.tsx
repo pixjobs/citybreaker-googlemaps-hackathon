@@ -38,7 +38,9 @@ interface AnimatedHeaderBoardProps {
   cities: City[];
   onSelectCity: (city: City) => void;
   onMenuAction: (action: string) => void;
-  onPlaceNavigate: (place: google.maps.places.PlaceResult) => void;
+  // ✅ FIX: Update the type to accept the modern `Place` object from the new API.
+  // Using a union type provides maximum safety and compatibility.
+  onPlaceNavigate: (place: google.maps.places.Place | google.maps.places.PlaceResult) => void;
   mapBounds: google.maps.LatLngBounds | null;
   isSatelliteView: boolean;
 }
@@ -91,7 +93,6 @@ export default function AnimatedHeaderBoard({
 
   // --- EFFECTS ---
 
-  // Animate header in
   useEffect(() => {
     if (containerRef.current) {
       gsap.fromTo(
@@ -102,7 +103,6 @@ export default function AnimatedHeaderBoard({
     }
   }, []);
 
-  // Calculate board position on resize
   useLayoutEffect(() => {
     function updateTop() {
       if (containerRef.current) {
@@ -116,7 +116,6 @@ export default function AnimatedHeaderBoard({
     return () => window.removeEventListener("resize", updateTop);
   }, []);
 
-  // Close menu when clicking outside
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {

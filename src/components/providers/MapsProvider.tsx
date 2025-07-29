@@ -5,7 +5,7 @@ import { Loader } from '@googlemaps/js-api-loader';
 
 interface MapsContextType {
   isLoaded: boolean;
-  loadError?: Error; // Optionally expose loading errors
+  loadError?: Error;
 }
 
 const MapsContext = createContext<MapsContextType>({ isLoaded: false });
@@ -17,42 +17,47 @@ export function MapsProvider({ children }: { children: ReactNode }) {
   const [loadError, setLoadError] = useState<Error | undefined>();
 
   useEffect(() => {
-    // This effect runs only once when the app starts.
+    // This effect should only run once, so the empty dependency array is correct.
     const getApiKeyAndLoad = async () => {
       try {
-        // 1. Fetch the API key from our secure server-side route.
+        // 1. Fetch the API key from the secure server-side route.
         const response = await fetch('/api/maps-key');
         if (!response.ok) {
-          throw new Error(`Failed to fetch API key. Status: ${response.status}`);
+          throw new Error(`Server responded with ${response.status} while fetching API key.`);
         }
         const { apiKey } = await response.json();
 
-        if (!apiKey) {
-          throw new Error("API key was not found in the response.");
+        if (typeof apiKey !== 'string' || !apiKey) {
+          throw new Error("API key was not found or is invalid in the server response.");
         }
 
-        // 2. Use the fetched key to initialize the loader.
+        // 2. Initialize the loader with the correct libraries for modern components.
         const loader = new Loader({
           apiKey: apiKey,
           version: 'weekly',
-          libraries: ['maps', 'places', 'core'],
+          // ✅ REFINED: Load 'places' for the Places API and 'marker' for AdvancedMarkerElement.
+          // 'maps' and 'core' are loaded by default and are not needed here.
+          libraries: ['places', 'marker'], 
         });
 
         // 3. Load the Google Maps script.
         await loader.load();
         setIsLoaded(true);
-        console.log("Google Maps script loaded successfully.");
+        console.log("Google Maps script and required libraries loaded successfully.");
 
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e));
-        setLoadError(error); // Store the error state
-        console.error("Failed to load Google Maps script:", error);
+        setLoadError(error);
+        console.error("Failed to load Google Maps script:", error.message);
       }
     };
     
-    getApiKeyAndLoad();
+    // Check if the script is already in the process of loading to avoid double-fetching.
+    if (!window.google) {
+        getApiKeyAndLoad();
+    }
       
-  }, []); // The empty array [] ensures this effect runs only once.
+  }, []); // The empty dependency array is correct.
 
   return (
     <MapsContext.Provider value={{ isLoaded, loadError }}>
