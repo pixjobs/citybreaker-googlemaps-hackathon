@@ -1,80 +1,71 @@
 # ==============================================================================
-# STAGE 1: Builder – install deps and build Next.js (standalone)
+# STAGE 1: Builder - install deps and build Next.js
 # ==============================================================================
 FROM node:20-bookworm-slim AS builder
 
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
-
-# Basic OS deps for building (git optional)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    dumb-init \
-    git \
-  && rm -rf /var/lib/apt/lists/*
+    NEXT_TELEMETRY_DISABLED=1 \
+    # Prevent Puppeteer from downloading Chromium in the build stage
+    PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 
 WORKDIR /app
 
-# Install dependencies
-COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* .npmrc* ./ 
-# Prefer npm ci when lockfile present
+# Install minimal build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates dumb-init git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy manifests and install deps (use lockfile if present)
+COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* .npmrc* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 # Copy source and build
 COPY . .
-# Ensure Next.js outputs standalone server
-# (in next.config.js:  module.exports = { output: 'standalone' } )
 RUN npm run build
 
 # ==============================================================================
-# STAGE 2: Runner – minimal runtime with Chrome shared libs + fonts
+# STAGE 2: Runner - install system Chromium & runtime libs, run app
 # ==============================================================================
 FROM node:20-bookworm-slim AS runner
 
+# Install system Chromium and required runtime libs/fonts for headless mode
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    ca-certificates dumb-init \
+    # Common Chrome/GTK/graphical deps
+    libasound2 libatk-bridge2.0-0 libatk1.0-0 libc6 libcairo2 libcups2 \
+    libdbus-1-3 libexpat1 libfontconfig1 libgbm1 libglib2.0-0 libgtk-3-0 \
+    libnspr4 libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 libxcb1 \
+    libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 \
+    libxrandr2 libxrender1 libxss1 xdg-utils \
+    # Fonts (better layout + emoji)
+    fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    # Cloud Run provides PORT at runtime; default to 8080
+    # Tell Puppeteer where Chromium lives on Debian
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    # Cloud Run port
     PORT=8080
-
-# Install shared libs Chrome needs (no browser binary here)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    dumb-init \
-    ca-certificates \
-    # Chromium runtime deps:
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libgbm1 \
-    libxkbcommon0 \
-    libx11-6 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libxshmfence1 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    # fonts to avoid tofu + emojis:
-    fonts-liberation \
-    fonts-dejavu \
-    fonts-noto-color-emoji \
-  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy the standalone server and static assets
-# (Next.js creates server.js and includes node_modules needed by server)
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+# Run as non-root
+RUN groupadd -g 1001 nextjs \
+ && useradd -u 1001 -g nextjs -d /app -s /usr/sbin/nologin nextjs
 
-# Use the non-root 'node' user provided by the base image
-USER node
+# Copy the minimal standalone output from the build stage
+COPY --from=builder --chown=nextjs:nextjs /app/public ./public
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+# (Optional) copy next config if you reference it at runtime
+# COPY --from=builder --chown=nextjs:nextjs /app/next.config.* ./ 2>/dev/null || true
+
+USER nextjs
 
 EXPOSE 8080
 
-# Use dumb-init for proper signal handling on Cloud Run
-CMD ["dumb-init", "node", "server.js"]
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "server.js"]
