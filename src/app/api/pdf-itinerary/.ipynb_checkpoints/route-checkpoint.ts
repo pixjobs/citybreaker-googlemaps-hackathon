@@ -22,7 +22,6 @@ import {
   EnrichedPlace,
   ItineraryDayCache,
   FirestoreItineraryCacheV2,
-  buildItineraryKey,
   placeKeyFromName,
 } from '@/lib/firestoreCache';
 
@@ -80,12 +79,17 @@ let mapsKey: string | null = null;
  * ============================================================================ */
 
 async function getSecret(name: string): Promise<string> {
-  const [version] = await smClient.accessSecretVersion({ name });
-  const secretValue = version.payload?.data?.toString();
-  if (!secretValue) {
-    throw new Error(`Secret ${name} is empty or could not be retrieved.`);
+  try {
+    const [version] = await smClient.accessSecretVersion({ name });
+    const secretValue = version.payload?.data?.toString();
+    if (!secretValue) {
+      throw new Error(`Secret ${name} is empty or could not be retrieved.`);
+    }
+    return secretValue;
+  } catch (error) {
+    console.error(`Failed to retrieve secret: ${name}`, error);
+    throw new Error(`Could not access secret: ${name}`);
   }
-  return secretValue;
 }
 
 function createFilename(city: string, days: number): string {
@@ -497,7 +501,7 @@ export async function POST(req: NextRequest) {
         days,
         places: enriched,
         itinerary,
-        guide, // Storing the structured guide object
+        guide: { ...guide }, // FIX: Spread to satisfy JsonObject type
         assets: {
             pdfPath: gcsPath,
             pdfSignedUrl: url,
