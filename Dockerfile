@@ -1,76 +1,80 @@
 # ==============================================================================
-# STAGE 1: Builder - Install dependencies and build the Next.js app
+# STAGE 1: Builder – install deps and build Next.js (standalone)
 # ==============================================================================
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
-# Install dependencies required to build and run Puppeteer with Chromium
-RUN apk add --no-cache \
-    bash \
-    chromium \
-    nss \
-    freetype \
-    freetype-dev \
-    harfbuzz \
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
+
+# Basic OS deps for building (git optional)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    ttf-freefont \
-    nodejs \
-    yarn \
-    udev \
     dumb-init \
-    curl \
-    && rm -rf /var/cache/*
+    git \
+  && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy dependency manifests
-COPY package.json package-lock.json ./
-
 # Install dependencies
-RUN npm install
+COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* .npmrc* ./ 
+# Prefer npm ci when lockfile present
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-# Copy the rest of the application source code
+# Copy source and build
 COPY . .
-
-# Build the Next.js application
+# Ensure Next.js outputs standalone server
+# (in next.config.js:  module.exports = { output: 'standalone' } )
 RUN npm run build
 
 # ==============================================================================
-# STAGE 2: Runner - Create the final, optimized production image
+# STAGE 2: Runner – minimal runtime with Chrome shared libs + fonts
 # ==============================================================================
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 
-# Install Chromium runtime dependencies
-RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont \
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    # Cloud Run provides PORT at runtime; default to 8080
+    PORT=8080
+
+# Install shared libs Chrome needs (no browser binary here)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     dumb-init \
-    udev \
-    && rm -rf /var/cache/*
-
-# Set Puppeteer to use system-installed Chromium
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    ca-certificates \
+    # Chromium runtime deps:
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libgbm1 \
+    libxkbcommon0 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libxshmfence1 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    # fonts to avoid tofu + emojis:
+    fonts-liberation \
+    fonts-dejavu \
+    fonts-noto-color-emoji \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Create a non-root user and group named 'nextjs' with UID/GID 1001
-RUN addgroup -g 1001 nextjs && adduser -S -u 1001 -G nextjs nextjs
+# Copy the standalone server and static assets
+# (Next.js creates server.js and includes node_modules needed by server)
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 
-# Copy build artifacts from builder stage with correct ownership
-COPY --from=builder --chown=nextjs:nextjs /app/public ./public
-COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+# Use the non-root 'node' user provided by the base image
+USER node
 
-# Use the non-root user
-USER nextjs
-
-# Expose the port the app will run on. Cloud Run provides the PORT env var.
 EXPOSE 8080
-ENV PORT 8080
 
-# Start the application
-CMD ["node", "server.js"]
+# Use dumb-init for proper signal handling on Cloud Run
+CMD ["dumb-init", "node", "server.js"]
