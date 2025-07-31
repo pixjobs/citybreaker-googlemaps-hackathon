@@ -1,7 +1,7 @@
 # ==============================================================================
 # STAGE 1: Builder
 # - Installs all dependencies (including devDependencies) needed for the build.
-# - Creates the optimized standalone output.
+# - Creates the optimized standalone output for Next.js.
 # ==============================================================================
 FROM node:20-bookworm-slim AS builder
 
@@ -19,14 +19,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 # Copy package manifests
 COPY package.json package-lock.json* ./
 
-# Install ALL dependencies, including devDependencies needed for the build
-RUN npm ci
+# --- THE FIX ---
+# We use `npm install` instead of `npm ci` here.
+# `npm install` will install `devDependencies` even when NODE_ENV is 'production',
+# which is necessary for the build step to have access to tools like TailwindCSS.
+# `npm ci` would skip them, causing the build to fail.
+RUN npm install
 
 # Copy the rest of the application source code
 COPY . .
 
 # Build the Next.js application.
-# With `output: 'standalone'` in next.config.mjs, this creates the .next/standalone directory.
+# This requires `output: 'standalone'` in your next.config.mjs file.
 RUN npm run build
 
 
