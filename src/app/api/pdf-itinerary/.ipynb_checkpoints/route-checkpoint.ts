@@ -1,35 +1,35 @@
+
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { Storage } from '@google-cloud/storage';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 
-/* ==============================
- * Config
- * ============================== */
+/* ============================================================================
+ * CONFIGURATION
+ * ============================================================================ */
+
+// --- Secrets & Cloud Config ---
 const GEMINI_SECRET = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
 const MAPS_SECRET   = 'projects/934477100130/secrets/places-api-key/versions/latest';
 const BUCKET_NAME   = 'citybreaker-downloads';
-const GEMINI_MODEL  = 'gemini-2.5-pro';
+const GEMINI_MODEL  = 'gemini-1.5-pro';
 
+// --- API Endpoints ---
 const PLACES_SEARCH_TEXT_URL = 'https://places.googleapis.com/v1/places:searchText';
 const PLACES_PHOTO_BASE_URL  = 'https://places.googleapis.com/v1';
 
-/* ==============================
- * Clients & in-memory caches
- * ============================== */
-const storage = new Storage();
-const smClient = new SecretManagerServiceClient();
-let geminiKey: string | null = null;
-let mapsKey: string | null = null;
-
+// --- Caching Durations ---
 const PLACE_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;  // 7 days
 const PDF_CACHE_TTL_MS   = 1000 * 60 * 60 * 24;      // 24 hours
+
+/* ============================================================================
+ * TYPE DEFINITIONS
+ * ============================================================================ */
 
 interface EnrichedPlace {
   name: string;
@@ -69,39 +69,75 @@ interface DreamerRec {
   note?: string;
 }
 
-const placeDetailsCache = new Map<string, EnrichedPlace>();   // key -> place
-const pdfCache = new Map<string, string>();                   // key -> signed URL
+/* ============================================================================
+ * CLIENTS & CACHING
+ * ============================================================================ */
+
+const storage = new Storage();
+const smClient = new SecretManagerServiceClient();
+
+// --- Lazily loaded secrets ---
+let geminiKey: string | null = null;
+let mapsKey: string | null = null;
+
+// --- In-memory caches (cleared on server restart) ---
+const placeDetailsCache = new Map<string, EnrichedPlace>();
+const pdfCache = new Map<string, string>();
 
 function setCache<T>(cache: Map<string, T>, key: string, value: T, ttl: number): void {
   cache.set(key, value);
   setTimeout(() => cache.delete(key), ttl);
 }
+
 function getCache<T>(cache: Map<string, T>, key: string): T | undefined {
   return cache.get(key);
 }
 
-/* ==============================
- * Helpers
- * ============================== */
+/* ============================================================================
+ * CORE HELPERS
+ * ============================================================================ */
+
+/**
+ * Retrieves a secret value from Google Secret Manager.
+ * @param name The full resource name of the secret version.
+ * @returns The secret value as a string.
+ */
 async function getSecret(name: string): Promise<string> {
   const [version] = await smClient.accessSecretVersion({ name });
   const secretValue = version.payload?.data?.toString();
-  if (!secretValue) throw new Error(`Secret ${name} is empty or could not be retrieved.`);
+  if (!secretValue) {
+    throw new Error(`Secret ${name} is empty or could not be retrieved.`);
+  }
   return secretValue;
 }
 
+/**
+ * Creates a sanitized filename for the PDF.
+ * @param city The name of the city.
+ * @param days The number of days for the trip.
+ * @returns A URL-safe filename string.
+ */
 function createFilename(city: string, days: number): string {
-  const safeCity = city.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+  const safeCity = city.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_.-]/g, '');
   return `${safeCity}_${days}d_Guide.pdf`;
 }
 
+/**
+ * Converts a string into a URL-friendly slug.
+ * @param s The string to slugify.
+ * @returns A lowercased, hyphenated string.
+ */
 function slug(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, '-');
 }
 
-/* ==============================
- * Place enrichment (with cache)
- * ============================== */
+/* ============================================================================
+ * DATA FETCHING & AI GENERATION
+ * ============================================================================ */
+
+/**
+ * Enriches a list of place names with details from the Google Places API.
+ */
 async function enrichPlaces(
   places: { name: string }[],
   apiKey: string,
@@ -117,25 +153,26 @@ async function enrichPlaces(
       if (cached) return cached;
 
       try {
-        const requestBody = { textQuery: searchQuery };
-        const requestHeaders = {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.websiteUri,places.googleMapsUri,places.photos',
-        };
         const res = await fetch(PLACES_SEARCH_TEXT_URL, {
-          method: 'POST', headers: requestHeaders, body: JSON.stringify(requestBody),
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': apiKey,
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.websiteUri,places.googleMapsUri,places.photos',
+          },
+          body: JSON.stringify({ textQuery: searchQuery }),
         });
-        if (!res.ok) throw new Error(`Places API error: ${res.status} - ${await res.text()}`);
+
+        if (!res.ok) {
+          throw new Error(`Places API error: ${res.status} - ${await res.text()}`);
+        }
 
         const data = await res.json();
         const place = data.places?.[0];
         if (!place) return { name: originalName };
 
         const photoName = place.photos?.[0]?.name as string | undefined;
-        const photoUrl = photoName
-          ? `${PLACES_PHOTO_BASE_URL}/${photoName}/media?key=${apiKey}&maxHeightPx=1200`
-          : undefined;
+        const photoUrl = photoName ? `${PLACES_PHOTO_BASE_URL}/${photoName}/media?key=${apiKey}&maxHeightPx=1200` : undefined;
 
         const enriched: EnrichedPlace = {
           name: place.displayName?.text || originalName,
@@ -144,6 +181,7 @@ async function enrichPlaces(
           googleMapsUrl: place.googleMapsUri,
           tripAdvisorUrl: `https://www.tripadvisor.com/Search?q=${encodeURIComponent(searchQuery)}`,
         };
+
         setCache(placeDetailsCache, cacheKey, enriched, PLACE_CACHE_TTL_MS);
         return enriched;
       } catch (error) {
@@ -154,9 +192,9 @@ async function enrichPlaces(
   );
 }
 
-/* ==============================
- * Gemini generation (Pro)
- * ============================== */
+/**
+ * Generates a travel itinerary using the Gemini API.
+ */
 async function generateItineraryJson(
   places: EnrichedPlace[],
   days: number,
@@ -167,46 +205,44 @@ async function generateItineraryJson(
   const model = client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { responseMimeType: 'application/json' } });
 
   const placeList = places.map((p) => `"${p.name}"`).join(', ');
-  const prompt =
-    `You are a world-class travel concierge creating a premium, compact itinerary for ${city}.\n` +
-    `Reply with a SINGLE JSON object: {"itinerary":[{...}]}\n` +
-    `For a ${days}-day trip, each day has:\n` +
-    `  - "title"\n` +
-    `  - "activities": EXACTLY 2 entries with { "title", "placeName"(from [${placeList}]), "priceRange" (Free/$/$$/$$$), "audience", "description"(~22-28 words), "whyVisit"(<=10 words), "insiderTip"(<=10 words) }.\n` +
-    `Make the writing polished and magazine-ready.`;
+  const prompt = `You are a world-class travel concierge creating a premium, compact itinerary for ${city}. Reply with a SINGLE JSON object: {"itinerary":[{...}]}. For a ${days}-day trip, each day has: "title" and "activities": EXACTLY 2 entries with { "title", "placeName"(from [${placeList}]), "priceRange" (Free/$/$$/$$$), "audience", "description"(~22-28 words), "whyVisit"(<=10 words), "insiderTip"(<=10 words) }. Make the writing polished and magazine-ready.`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
   try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
     const parsed = JSON.parse(text) as { itinerary?: ItineraryDay[] };
-    if (!Array.isArray(parsed.itinerary)) throw new Error('Missing itinerary array');
+    if (!Array.isArray(parsed.itinerary)) {
+      throw new Error('Malformed response: "itinerary" key is not an array.');
+    }
     return parsed.itinerary;
-  } catch (e) {
-    console.error('Gemini itinerary parse error:', text, e);
-    throw new Error('Could not generate a valid itinerary structure.');
+  } catch (error) {
+    console.error('Gemini itinerary generation failed:', error);
+    throw new Error('Could not generate a valid itinerary from the AI model.');
   }
 }
 
+/**
+ * Generates the main city guide content using the Gemini API.
+ */
 async function generateCityGuideJson(city: string, places: EnrichedPlace[]): Promise<CityGuide> {
   if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
   const client = new GoogleGenerativeAI(geminiKey);
   const model = client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { responseMimeType: 'application/json' } });
 
   const placeNames = places.map((p) => p.name).join(', ');
-  const prompt =
-    `You are a professional travel guide writer. For ${city}, produce a SINGLE JSON object {"guide":{...}}\n` +
-    `"guide" has: "tagline", "coverPhotoSuggestion"(ONE from [${placeNames}]),\n` +
-    `"airportTransport":{title,content(55-70 words)}, "publicTransport":{title,content(55-70 words)}, "proTips":{title,content(55-70 words)}.`;
+  const prompt = `You are a professional travel guide writer. For ${city}, produce a SINGLE JSON object {"guide":{...}}. The "guide" object has: "tagline", "coverPhotoSuggestion"(ONE from [${placeNames}]), "airportTransport":{title,content(55-70 words)}, "publicTransport":{title,content(55-70 words)}, "proTips":{title,content(55-70 words)}.`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
   try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
     const parsed = JSON.parse(text) as { guide?: CityGuide };
-    if (!parsed.guide) throw new Error('Missing guide');
+    if (!parsed.guide) {
+      throw new Error('Malformed response: "guide" key not found.');
+    }
     return parsed.guide;
-  } catch (e) {
-    console.error('Gemini city guide parse error:', text, e);
-    return {
+  } catch (error) {
+    console.error('Gemini city guide generation failed:', error);
+    return { // Fallback content
       tagline: 'Your Unforgettable Journey',
       coverPhotoSuggestion: places[0]?.name || 'city view',
       airportTransport: { title: 'Arrival & Airport Transit', content: 'Information currently unavailable.' },
@@ -216,67 +252,70 @@ async function generateCityGuideJson(city: string, places: EnrichedPlace[]): Pro
   }
 }
 
-/* ==============================
- * Dreamers / Engineers page
- * ============================== */
-function dreamersForCity(city: string): DreamerRec[] {
-  const key = slug(city);
-  if (/(^|-)london$/.test(key)) {
-    return [
-      { name: 'Imperial College London', area: 'South Kensington', url: 'https://www.imperial.ac.uk/', note: 'Engineering, science & innovation; White City campus & Enterprise Lab.' },
-      { name: 'UCL (University College London)', area: 'Bloomsbury', url: 'https://www.ucl.ac.uk/', note: 'Broad research powerhouse; AI, data science, built environment.' },
-      { name: 'King’s College London', area: 'Strand / Waterloo', url: 'https://www.kcl.ac.uk/', note: 'Health, policy, and emerging tech collaborations.' },
-      { name: 'LSE (London School of Economics)', area: 'Aldwych', url: 'https://www.lse.ac.uk/', note: 'Economics & entrepreneurship ecosystems intersecting with tech.' },
-    ];
+/**
+ * Generates the "Dreamers / Engineers" section using the Gemini API.
+ */
+async function generateDreamersJson(city: string): Promise<DreamerRec[]> {
+  if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
+  const client = new GoogleGenerativeAI(geminiKey);
+  const model = client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { responseMimeType: 'application/json' } });
+
+  const prompt = `You are a career and education advisor. For ${city}, identify the top 2-4 universities or tech hubs interesting to engineers and entrepreneurs. Provide your response as a SINGLE JSON object: {"dreamers": [...]}. Each item must have: "name", "area" (neighborhood or district), "url", and "note" (a concise one-sentence summary of its relevance to tech/innovation).`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const parsed = JSON.parse(text) as { dreamers?: DreamerRec[] };
+    if (!Array.isArray(parsed.dreamers)) {
+      throw new Error('Malformed response: "dreamers" key is not an array.');
+    }
+    return parsed.dreamers;
+  } catch (error) {
+    console.error(`Gemini dreamers generation failed for ${city}:`, error);
+    return []; // Return an empty array so PDF generation can still proceed.
   }
-  if (/san(-)?francisco|bay(-)?area|berkeley|oakland|silicon(-)?valley/.test(key)) {
-    return [
-      { name: 'Stanford University', area: 'Palo Alto', url: 'https://www.stanford.edu/', note: 'Engineering, AI & startup DNA near Sand Hill Road.' },
-      { name: 'UC Berkeley', area: 'Berkeley', url: 'https://www.berkeley.edu/', note: 'EECS, robotics, Berkeley SkyDeck accelerator.' },
-      { name: 'UCSF', area: 'Mission Bay', url: 'https://www.ucsf.edu/', note: 'Biomedical research & biotech hub.' },
-    ];
-  }
-  return [
-    { name: 'MIT', url: 'https://www.mit.edu/', note: 'Engineering & entrepreneurship, Cambridge MA.' },
-    { name: 'ETH Zürich', url: 'https://ethz.ch/', note: 'Robotics, materials, and deep tech, Switzerland.' },
-    { name: 'Stanford University', url: 'https://www.stanford.edu/', note: 'Engineering, AI, and startups, Bay Area.' },
-  ];
 }
 
-/* ==============================
- * Logo helper (async, no sync fs)
- * ============================== */
-let logoBase64Cache: string | null = null;
+/* ============================================================================
+ * HTML & PDF GENERATION
+ * ============================================================================ */
+
+/**
+ * Reads the logo file and returns it as a Base64 encoded data URI.
+ */
 async function getLogoBase64(): Promise<string> {
-  if (logoBase64Cache !== null) return logoBase64Cache;
+  let logoBase64Cache: string | null = null;
+  if (logoBase64Cache) return logoBase64Cache;
   try {
     const logoPath = path.join(process.cwd(), 'public', 'logo', 'citybreaker.png');
     const buf = await fsp.readFile(logoPath);
     logoBase64Cache = `data:image/png;base64,${buf.toString('base64')}`;
+    return logoBase64Cache;
   } catch {
+    console.error('Could not read logo file. It will be omitted from the PDF.');
     logoBase64Cache = '';
+    return logoBase64Cache;
   }
-  return logoBase64Cache;
 }
 
-/* ==============================
- * HTML (Magazine-style, compact)
- * ============================== */
+/**
+ * Constructs the complete HTML for the PDF.
+ */
 async function buildHtml(
   guide: CityGuide,
   itinerary: ItineraryDay[],
   enriched: EnrichedPlace[],
-  city: string
+  city: string,
+  dreamers: DreamerRec[]
 ): Promise<string> {
   const logoBase64 = await getLogoBase64();
-
   const coverPlace = enriched.find((p) => p.name === guide.coverPhotoSuggestion);
   const coverPhotoUrl = coverPlace?.photoUrl || enriched.find((p) => p.photoUrl)?.photoUrl || '';
 
   const coverPageHtml = `
     <section class="page cover-page" style="background-image: linear-gradient(to bottom, rgba(0,0,0,0.72), rgba(0,0,0,0.25) 40%, rgba(0,0,0,0.78) 100%), url('${coverPhotoUrl}');">
       <div class="cover-content">
-        ${logoBase64 ? `<img src="${logoBase64}" class="cover-logo" />` : ''}
+        ${logoBase64 ? `<img src="${logoBase64}" class="cover-logo" alt="Logo" />` : ''}
         <h1 class="cover-title">${city}</h1>
         <p class="cover-tagline">${guide.tagline}</p>
       </div>
@@ -285,8 +324,7 @@ async function buildHtml(
         <div class="guide-col"><h3>${guide.publicTransport.title}</h3><p>${guide.publicTransport.content}</p></div>
         <div class="guide-col"><h3>${guide.proTips.title}</h3><p>${guide.proTips.content}</p></div>
       </div>
-    </section>
-  `;
+    </section>`;
 
   let itineraryHtml = '';
   let pageCounter = 2;
@@ -294,181 +332,171 @@ async function buildHtml(
   itinerary.forEach((day, dayIndex) => {
     for (let i = 0; i < day.activities.length; i += 2) {
       const chunk = day.activities.slice(i, i + 2);
-      const activitiesHtml = chunk
-        .map((activity) => {
+      const activitiesHtml = chunk.map((activity) => {
           const place = enriched.find((p) => p.name === activity.placeName);
-          const websiteLink = place?.website ? `<a href="${place.website}">Official</a>` : '';
-          const mapsLink = place?.googleMapsUrl ? `<a href="${place.googleMapsUrl}">Maps</a>` : '';
-          const taLink = place?.tripAdvisorUrl ? `<a href="${place.tripAdvisorUrl}">TripAdvisor</a>` : '';
+          const links = [
+            place?.website ? `<a href="${place.website}" target="_blank">Official</a>` : '',
+            place?.googleMapsUrl ? `<a href="${place.googleMapsUrl}" target="_blank">Maps</a>` : '',
+            place?.tripAdvisorUrl ? `<a href="${place.tripAdvisorUrl}" target="_blank">TripAdvisor</a>` : '',
+          ].filter(Boolean).join(' ');
+
           return `
             <article class="activity">
-              <div class="image">
-                ${place?.photoUrl ? `<img src="${place.photoUrl}" alt="${activity.title}" />` : '<div class="no-image"></div>'}
-              </div>
+              <div class="image">${place?.photoUrl ? `<img src="${place.photoUrl}" alt="${activity.title}" />` : '<div class="no-image"></div>'}</div>
               <div class="content">
-                <div class="meta">
-                  <span class="pill">${activity.priceRange}</span>
-                  <span class="pill">${activity.audience}</span>
-                </div>
+                <div class="meta"><span class="pill">${activity.priceRange}</span><span class="pill">${activity.audience}</span></div>
                 <h3>${activity.title}</h3>
                 <p class="desc">${activity.description}</p>
                 <div class="kv">
                   <div><label>Why</label><p>${activity.whyVisit}</p></div>
                   <div><label>Tip</label><p>${activity.insiderTip}</p></div>
                 </div>
-                <div class="links">
-                  ${websiteLink} ${mapsLink} ${taLink}
-                </div>
+                <div class="links">${links}</div>
               </div>
-            </article>
-          `;
-        })
-        .join('');
+            </article>`;
+        }).join('');
 
       itineraryHtml += `
         <section class="page it-page">
           <header class="head">
-            ${logoBase64 ? `<img src="${logoBase64}" class="logo-small" />` : ''}
+            ${logoBase64 ? `<img src="${logoBase64}" class="logo-small" alt="Logo" />` : ''}
             <div class="head-text"><h1>${city}</h1><span>Curated Itinerary</span></div>
           </header>
           ${i === 0 ? `<div class="day-title"><h2>Day ${dayIndex + 1}</h2><h1>${day.title}</h1></div>` : '<div class="day-title placeholder"></div>'}
           <div class="acts">${activitiesHtml}</div>
           <footer class="foot"><p>CityBreaker</p><p>${pageCounter}</p></footer>
-        </section>
-      `;
+        </section>`;
       pageCounter++;
     }
   });
 
-  const dreamers = dreamersForCity(city);
-  const dreamersHtml = dreamers
-    .map(
-      (d) => `
-    <div class="dre-card">
-      <h3>${d.name}${d.area ? ` · <span class="area">${d.area}</span>` : ''}</h3>
-      ${d.note ? `<p class="dre-note">${d.note}</p>` : ''}
-      <p class="dre-link"><a href="${d.url}">${d.url.replace(/^https?:\/\//, '')}</a></p>
-    </div>
-  `
-    )
-    .join('');
+  let dreamersPage = '';
+  if (dreamers.length > 0) {
+    const dreamersHtml = dreamers.map((d) => `
+        <div class="dre-card">
+          <h3>${d.name}${d.area ? ` · <span class="area">${d.area}</span>` : ''}</h3>
+          ${d.note ? `<p class="dre-note">${d.note}</p>` : ''}
+          <p class="dre-link"><a href="${d.url}" target="_blank">${d.url.replace(/^https?:\/\//, '')}</a></p>
+        </div>`).join('');
 
-  const dreamersPage = `
-    <section class="page dre-page">
-      <header class="dre-head">
-        ${logoBase64 ? `<img src="${logoBase64}" class="logo-small" />` : ''}
-        <div class="dre-title"><h1>Dreamers / Engineers</h1><span>Universities & ecosystems to explore</span></div>
-      </header>
-      <div class="dre-grid">
-        ${dreamersHtml}
-      </div>
-      <footer class="foot"><p>CityBreaker</p><p>${pageCounter}</p></footer>
-    </section>
-  `;
+    dreamersPage = `
+      <section class="page dre-page">
+        <header class="dre-head">
+          ${logoBase64 ? `<img src="${logoBase64}" class="logo-small" alt="Logo" />` : ''}
+          <div class="dre-title"><h1>Dreamers / Engineers</h1><span>Universities & ecosystems to explore</span></div>
+        </header>
+        <div class="dre-grid">${dreamersHtml}</div>
+        <footer class="foot"><p>CityBreaker</p><p>${pageCounter}</p></footer>
+      </section>`;
+  }
 
   const styles = `
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600;700&display=swap');
-    :root {
-      --serif: 'Playfair Display', serif;
-      --sans: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif;
-      --brand: #E6C670;
-      --bg: #181818;
-      --text: #EAEAEA;
-      --muted: #A0A0A0;
-      --card: #232323;
-      --line: #3a3a3a;
-    }
-    html, body { margin:0; padding:0; background:#000; }
-    body { font-family: var(--sans); color: var(--text); -webkit-print-color-adjust: exact; }
-    .page { width: 210mm; height: 297mm; box-sizing: border-box; page-break-after: always; position: relative; display:flex; flex-direction: column; overflow: hidden; background: var(--bg); }
-    .page:last-child { page-break-after: auto; }
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600;700&display=swap');
+      :root { --serif: 'Playfair Display', serif; --sans: 'Inter', system-ui, sans-serif; --brand: #E6C670; --bg: #181818; --text: #EAEAEA; --muted: #A0A0A0; --card: #232323; --line: #3a3a3a; }
+      html, body { margin:0; padding:0; background:#000; }
+      body { font-family: var(--sans); color: var(--text); -webkit-print-color-adjust: exact; }
+      .page { width: 210mm; height: 297mm; box-sizing: border-box; page-break-after: always; position: relative; display:flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+      .page:last-child { page-break-after: auto; }
+      a { color: var(--brand); text-decoration: none; }
+      .cover-page { background-size: cover; background-position: center; justify-content: space-between; color:#fff; }
+      .cover-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 18mm 14mm 6mm; text-align:center; }
+      .cover-logo { width: 120px; height:120px; margin-bottom: 16px; filter: invert(1) brightness(1.2); }
+      .cover-title { font-family: var(--serif); font-size: 64px; letter-spacing: .5px; margin: 0; text-shadow: 2px 2px 10px rgba(0,0,0,.6); }
+      .cover-tagline { font-size: 15px; letter-spacing: 2px; text-transform: uppercase; margin: 8px 0 0; color: #f0f0f0; opacity: .95; }
+      .cover-guide-container { display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14mm; margin: 6mm 10mm 16mm; background: rgba(24,24,24,.88); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; }
+      .guide-col h3 { font-family: var(--serif); color: var(--brand); font-size: 16px; margin:0 0 6px; }
+      .guide-col p { font-size: 12.5px; line-height: 1.55; margin:0; color: var(--text); }
+      .it-page { padding: 12mm; }
+      .head { display:flex; align-items:center; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+      .logo-small { width: 44px; height:44px; margin-right: 12px; filter: invert(1) brightness(1.2); }
+      .head-text h1 { font-family: var(--serif); font-size: 26px; margin:0; }
+      .head-text span { font-size: 12px; color: var(--muted); }
+      .day-title { text-align:center; margin: 10mm 0 7mm; }
+      .day-title h2 { font-size: 13px; color: var(--brand); letter-spacing: 2px; margin:0; text-transform: uppercase; }
+      .day-title h1 { font-family: var(--serif); font-size: 28px; margin: 4px 0 0; }
+      .day-title.placeholder { min-height: 52px; margin: 10mm 0 7mm; }
+      .acts { display:flex; flex-direction: column; gap: 8mm; }
+      .activity { display:flex; gap: 8mm; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+      .image { width: 38%; min-height: 72mm; background: #2b2b2b; }
+      .image img { width:100%; height:100%; object-fit: cover; display:block; }
+      .no-image { width:100%; height:100%; background: #2f2f2f; }
+      .content { flex:1; padding: 10mm 10mm 9mm 0; display:flex; flex-direction: column; }
+      .meta { display:flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+      .pill { font-size: 11px; color: #111; background: var(--brand); padding: 4px 8px; border-radius: 100px; font-weight: 600; }
+      .content h3 { font-family: var(--serif); font-size: 18px; margin: 2px 0 6px; }
+      .desc { font-size: 12.5px; line-height: 1.55; margin: 0 0 8px; color: var(--text); }
+      .kv { display:grid; grid-template-columns: 1fr 1fr; gap: 6mm; margin: 4px 0 8px; }
+      .kv label { display:block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+      .kv p { font-size: 12.5px; line-height: 1.5; margin:0; }
+      .links a { margin-right: 10px; }
+      .foot { position:absolute; bottom: 8mm; left: 12mm; right:12mm; display:flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+      .dre-page { padding: 14mm; }
+      .dre-head { display:flex; align-items:center; border-bottom:1px solid var(--line); padding-bottom:8px; }
+      .dre-title h1 { font-family: var(--serif); font-size: 26px; margin:0; }
+      .dre-title span { font-size: 12px; color: var(--muted); }
+      .dre-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 8mm; margin-top: 10mm; }
+      .dre-card { background: var(--card); border:1px solid var(--line); border-radius: 10px; padding: 8mm; }
+      .dre-card h3 { font-family: var(--serif); font-size: 18px; margin:0 0 4px; }
+      .dre-card .area { font-weight: 600; color: var(--brand); font-size: 14px; }
+      .dre-note { font-size: 12.5px; line-height: 1.55; color: var(--text); margin: 4px 0 8px; }
+      .dre-link a { font-size: 12.5px; word-break: break-word; }
+      @media screen and (max-width: 900px) {
+        .page { width: 100vw; height: auto; min-height: 100vh; }
+        .cover-guide-container { grid-template-columns: 1fr; }
+        .activity { flex-direction: column; }
+        .image { width: 100%; min-height: 48vw; }
+        .content { padding: 10mm; }
+        .dre-grid { grid-template-columns: 1fr; }
+      }
+    </style>`;
 
-    /* Cover */
-    .cover-page { background-size: cover; background-position: center; justify-content: space-between; color:#fff; }
-    .cover-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 18mm 14mm 6mm; text-align:center; }
-    .cover-logo { width: 120px; height:120px; margin-bottom: 16px; filter: invert(1) brightness(1.2); }
-    .cover-title { font-family: var(--serif); font-size: 64px; letter-spacing: .5px; margin: 0; text-shadow: 2px 2px 10px rgba(0,0,0,.6); }
-    .cover-tagline { font-size: 15px; letter-spacing: 2px; text-transform: uppercase; margin: 8px 0 0; color: #f0f0f0; opacity: .95; }
-    .cover-guide-container { display:grid; grid-template-columns: 1fr; gap: 12px; padding: 14mm; margin: 6mm 10mm 16mm; background: rgba(24,24,24,.88); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; }
-    .guide-col h3 { font-family: var(--serif); color: var(--brand); font-size: 16px; margin:0 0 6px; }
-    .guide-col p { font-size: 12.5px; line-height: 1.55; margin:0; color: var(--text); }
-
-    /* Itinerary pages */
-    .it-page { padding: 12mm; }
-    .head { display:flex; align-items:center; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-    .logo-small { width: 44px; height:44px; margin-right: 12px; filter: invert(1) brightness(1.2); }
-    .head-text h1 { font-family: var(--serif); font-size: 26px; margin:0; }
-    .head-text span { font-size: 12px; color: var(--muted); }
-
-    .day-title { text-align:center; margin: 10mm 0 7mm; }
-    .day-title h2 { font-size: 13px; color: var(--brand); letter-spacing: 2px; margin:0; text-transform: uppercase; }
-    .day-title h1 { font-family: var(--serif); font-size: 28px; margin: 4px 0 0; }
-    .day-title.placeholder { height: 22mm; }
-
-    .acts { display:flex; flex-direction: column; gap: 8mm; }
-    .activity { display:flex; gap: 8mm; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-    .image { width: 38%; min-height: 72mm; background: #2b2b2b; }
-    .image img { width:100%; height:100%; object-fit: cover; display:block; }
-    .no-image { width:100%; height:100%; background: #2f2f2f; }
-    .content { flex:1; padding: 10mm 10mm 9mm 0; display:flex; flex-direction: column; }
-    .meta { display:flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
-    .pill { font-size: 11px; color: #111; background: var(--brand); padding: 4px 8px; border-radius: 100px; font-weight: 600; }
-    .content h3 { font-family: var(--serif); font-size: 18px; margin: 2px 0 6px; }
-    .desc { font-size: 12.5px; line-height: 1.55; margin: 0 0 8px; color: var(--text); }
-    .kv { display:grid; grid-template-columns: 1fr 1fr; gap: 6mm; margin: 4px 0 8px; }
-    .kv label { display:block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
-    .kv p { font-size: 12.5px; line-height: 1.5; margin:0; }
-    .links a { font-size: 12px; color: var(--brand); text-decoration: none; margin-right: 10px; }
-
-    .foot { position:absolute; bottom: 8mm; left: 12mm; right:12mm; display:flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
-
-    /* Dreamers / Engineers */
-    .dre-page { padding: 14mm; }
-    .dre-head { display:flex; align-items:center; border-bottom:1px solid var(--line); padding-bottom:8px; }
-    .dre-title h1 { font-family: var(--serif); font-size: 26px; margin:0; }
-    .dre-title span { font-size: 12px; color: var(--muted); }
-    .dre-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 8mm; margin-top: 10mm; }
-    .dre-card { background: var(--card); border:1px solid var(--line); border-radius: 10px; padding: 8mm; }
-    .dre-card h3 { font-family: var(--serif); font-size: 18px; margin:0 0 4px; }
-    .dre-card .area { font-weight: 600; color: var(--brand); font-size: 14px; }
-    .dre-note { font-size: 12.5px; line-height: 1.55; color: var(--text); margin: 4px 0 8px; }
-    .dre-link a { color: var(--brand); font-size: 12.5px; text-decoration: none; word-break: break-word; }
-
-    /* Mobile-ish scale (helps on iPad/phones that display the PDF) */
-    @media screen and (max-width: 900px) {
-      .page { width: 100vw; height: auto; min-height: 100vh; }
-      .image { min-height: 48vw; }
-      .dre-grid { grid-template-columns: 1fr; }
-    }
-  </style>`;
-
-  return `<!DOCTYPE html>
-  <html lang="en">
-    <head>
-      <meta charset="utf-8" />
-      <title>${city} – CityBreaker Guide</title>
-      ${styles}
-    </head>
-    <body>
-      ${coverPageHtml}
-      ${itineraryHtml}
-      ${dreamersPage}
-    </body>
-  </html>`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><title>${city} – CityBreaker Guide</title>${styles}</head><body>${coverPageHtml}${itineraryHtml}${dreamersPage}</body></html>`;
 }
 
-/* ==============================
- * PDF rendering (puppeteer-core + @sparticuz/chromium)
- * ============================== */
-async function generatePdf(html: string): Promise<Buffer> {
-  const browser = await puppeteer.launch({
-    executablePath: await chromium.executablePath(),
-    args: chromium.args,
-    headless: true,        
-  });
+/**
+ * Dynamically determines the correct executable path for Puppeteer based on the environment.
+ * @returns The path to the Chromium executable.
+ */
+async function getExecutablePath(): Promise<string> {
+  // For production (in Docker), use the path from the environment variable.
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
 
+  // For local development, dynamically import the full 'puppeteer' package
+  // to find the browser it downloaded.
   try {
+    const puppeteerFull = await import('puppeteer');
+    return puppeteerFull.executablePath();
+  } catch (error) {
+    console.error("Could not import 'puppeteer'.", error);
+    throw new Error("For local development, you must install the full 'puppeteer' package as a dev dependency (`npm install -D puppeteer`).");
+  }
+}
+
+/**
+ * Generates a PDF buffer from an HTML string using Puppeteer.
+ */
+async function generatePdf(html: string): Promise<Buffer> {
+  let browser = null;
+  try {
+    const executablePath = await getExecutablePath();
+
+    browser = await puppeteer.launch({
+      executablePath,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+      ],
+      headless: true,
+    });
+
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
@@ -480,55 +508,53 @@ async function generatePdf(html: string): Promise<Buffer> {
 
     return Buffer.isBuffer(pdfRaw) ? pdfRaw : Buffer.from(pdfRaw);
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
-/* ==============================
- * Route handler
- * ============================== */
+/* ============================================================================
+ * API ROUTE HANDLER
+ * ============================================================================ */
+
 export async function POST(req: NextRequest) {
   try {
-    const { places = [], tripLength = 3, cityName = 'CityBreaker', sessionId } = await req.json();
+    const { places = [], tripLength = 3, cityName = 'City Guide', sessionId } = await req.json();
     if (!Array.isArray(places) || !places.length) {
-      return NextResponse.json({ error: 'Missing places' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing or invalid "places" array.' }, { status: 400 });
     }
     const city = cityName.trim();
     const days = Math.min(Math.max(tripLength, 1), 7);
 
-    // final-PDF cache (by city+days)
     const pdfCacheKey = `pdf:${slug(city)}:${days}`;
     const cachedUrl = getCache(pdfCache, pdfCacheKey);
     if (cachedUrl) {
       return NextResponse.json({ url: cachedUrl });
     }
 
-    // secrets
     if (!mapsKey) mapsKey = await getSecret(MAPS_SECRET);
 
-    // data & AI
     const enriched = await enrichPlaces(places, mapsKey, city);
-    if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
-    const [guide, itinerary] = await Promise.all([
+
+    const [guide, itinerary, dreamers] = await Promise.all([
       generateCityGuideJson(city, enriched),
       generateItineraryJson(enriched, days, city),
+      generateDreamersJson(city),
     ]);
 
-    // html + pdf
-    const html = await buildHtml(guide, itinerary, enriched, city);
-    const pdf  = await generatePdf(html);
+    const html = await buildHtml(guide, itinerary, enriched, city, dreamers);
+    const pdf = await generatePdf(html);
     const filename = createFilename(city, days);
 
-    // if sessionId present: upload to Cloud Storage & return signed URL (cached)
     if (sessionId) {
       const file = storage.bucket(BUCKET_NAME).file(`sessions/${sessionId}/${filename}`);
       await file.save(pdf, { contentType: 'application/pdf' });
-      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
+      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 60 * 60 * 1000 }); // 1 hour expiry
       setCache(pdfCache, pdfCacheKey, url, PDF_CACHE_TTL_MS);
       return NextResponse.json({ url });
     }
 
-    // else: return raw PDF
     return new NextResponse(pdf, {
       status: 200,
       headers: {
@@ -537,8 +563,8 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error during PDF generation.';
-    console.error('PDF route error:', error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const err = error as Error;
+    console.error('PDF route top-level error:', err.message, err.stack);
+    return NextResponse.json({ error: 'PDF generation failed.', details: err.message }, { status: 500 });
   }
 }
