@@ -1,13 +1,30 @@
-
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer-core';
+import puppeteer from 'puppeteer';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { Storage } from '@google-cloud/storage';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+
+// --- Import Firestore Cache Logic with corrected path ---
+import {
+  computePlacesSignature,
+  hashSignature,
+  getCachedItinerary,
+  isItineraryFresh,
+  DEFAULT_ITINERARY_TTL_MS,
+  storeCachedItinerary,
+  getManyPlaceEnrichments,
+  isPlaceFresh,
+  upsertPlaceEnrichment,
+  EnrichedPlace,
+  ItineraryDayCache,
+  FirestoreItineraryCacheV2,
+  buildItineraryKey,
+  placeKeyFromName,
+} from '@/lib/firestoreCache';
 
 /* ============================================================================
  * CONFIGURATION
@@ -17,42 +34,19 @@ import path from 'node:path';
 const GEMINI_SECRET = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
 const MAPS_SECRET   = 'projects/934477100130/secrets/places-api-key/versions/latest';
 const BUCKET_NAME   = 'citybreaker-downloads';
-const GEMINI_MODEL  = 'gemini-1.5-pro';
+const GEMINI_MODEL  = 'gemini-1.5-flash';
 
 // --- API Endpoints ---
 const PLACES_SEARCH_TEXT_URL = 'https://places.googleapis.com/v1/places:searchText';
 const PLACES_PHOTO_BASE_URL  = 'https://places.googleapis.com/v1';
 
-// --- Caching Durations ---
-const PLACE_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;  // 7 days
-const PDF_CACHE_TTL_MS   = 1000 * 60 * 60 * 24;      // 24 hours
 
 /* ============================================================================
  * TYPE DEFINITIONS
  * ============================================================================ */
 
-interface EnrichedPlace {
-  name: string;
-  photoUrl?: string;
-  website?: string;
-  tripAdvisorUrl?: string;
-  googleMapsUrl?: string;
-}
-
-interface ItineraryActivity {
-  title: string;
-  description: string;
-  whyVisit: string;
-  insiderTip: string;
-  placeName: string;
-  priceRange: string;
-  audience: string;
-}
-
-interface ItineraryDay {
-  title: string;
-  activities: ItineraryActivity[];
-}
+// Using ItineraryDayCache from firestoreCache to ensure consistency
+type ItineraryDay = ItineraryDayCache;
 
 interface CityGuide {
   tagline: string;
@@ -70,7 +64,7 @@ interface DreamerRec {
 }
 
 /* ============================================================================
- * CLIENTS & CACHING
+ * CLIENTS
  * ============================================================================ */
 
 const storage = new Storage();
@@ -80,28 +74,11 @@ const smClient = new SecretManagerServiceClient();
 let geminiKey: string | null = null;
 let mapsKey: string | null = null;
 
-// --- In-memory caches (cleared on server restart) ---
-const placeDetailsCache = new Map<string, EnrichedPlace>();
-const pdfCache = new Map<string, string>();
-
-function setCache<T>(cache: Map<string, T>, key: string, value: T, ttl: number): void {
-  cache.set(key, value);
-  setTimeout(() => cache.delete(key), ttl);
-}
-
-function getCache<T>(cache: Map<string, T>, key: string): T | undefined {
-  return cache.get(key);
-}
 
 /* ============================================================================
  * CORE HELPERS
  * ============================================================================ */
 
-/**
- * Retrieves a secret value from Google Secret Manager.
- * @param name The full resource name of the secret version.
- * @returns The secret value as a string.
- */
 async function getSecret(name: string): Promise<string> {
   const [version] = await smClient.accessSecretVersion({ name });
   const secretValue = version.payload?.data?.toString();
@@ -111,48 +88,43 @@ async function getSecret(name: string): Promise<string> {
   return secretValue;
 }
 
-/**
- * Creates a sanitized filename for the PDF.
- * @param city The name of the city.
- * @param days The number of days for the trip.
- * @returns A URL-safe filename string.
- */
 function createFilename(city: string, days: number): string {
   const safeCity = city.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_.-]/g, '');
   return `${safeCity}_${days}d_Guide.pdf`;
 }
 
-/**
- * Converts a string into a URL-friendly slug.
- * @param s The string to slugify.
- * @returns A lowercased, hyphenated string.
- */
-function slug(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, '-');
-}
 
 /* ============================================================================
- * DATA FETCHING & AI GENERATION
+ * DATA FETCHING & AI GENERATION (with Firestore Cache Integration)
  * ============================================================================ */
 
-/**
- * Enriches a list of place names with details from the Google Places API.
- */
 async function enrichPlaces(
-  places: { name: string }[],
+  placeNames: { name: string }[],
   apiKey: string,
   city: string
 ): Promise<EnrichedPlace[]> {
-  return Promise.all(
-    places.map(async ({ name }) => {
+  const names = placeNames.map(p => p.name);
+  const cachedData = await getManyPlaceEnrichments(names);
+  const enrichedPlaces: EnrichedPlace[] = [];
+  const placesToFetch: string[] = [];
+
+  for (const name of names) {
+    const key = placeKeyFromName(name);
+    const cacheEntry = cachedData.get(key);
+    if (cacheEntry && isPlaceFresh(cacheEntry)) {
+      enrichedPlaces.push(cacheEntry.place);
+    } else {
+      placesToFetch.push(name);
+    }
+  }
+
+  const newlyFetchedPlaces = await Promise.all(
+    placesToFetch.map(async (name) => {
       const originalName = name?.trim();
-      if (!originalName) return { name: 'Unnamed Place' };
-      const searchQuery = `${originalName} in ${city}`;
-      const cacheKey = `place-details:${slug(searchQuery)}`;
-      const cached = getCache(placeDetailsCache, cacheKey);
-      if (cached) return cached;
+      if (!originalName) return null;
 
       try {
+        const searchQuery = `${originalName} in ${city}`;
         const res = await fetch(PLACES_SEARCH_TEXT_URL, {
           method: 'POST',
           headers: {
@@ -163,15 +135,12 @@ async function enrichPlaces(
           body: JSON.stringify({ textQuery: searchQuery }),
         });
 
-        if (!res.ok) {
-          throw new Error(`Places API error: ${res.status} - ${await res.text()}`);
-        }
-
+        if (!res.ok) throw new Error(`Places API error: ${res.status}`);
         const data = await res.json();
         const place = data.places?.[0];
         if (!place) return { name: originalName };
 
-        const photoName = place.photos?.[0]?.name as string | undefined;
+        const photoName = place.photos?.[0]?.name;
         const photoUrl = photoName ? `${PLACES_PHOTO_BASE_URL}/${photoName}/media?key=${apiKey}&maxHeightPx=1200` : undefined;
 
         const enriched: EnrichedPlace = {
@@ -179,22 +148,22 @@ async function enrichPlaces(
           photoUrl,
           website: place.websiteUri,
           googleMapsUrl: place.googleMapsUri,
-          tripAdvisorUrl: `https://www.tripadvisor.com/Search?q=${encodeURIComponent(searchQuery)}`,
+          placeId: place.id,
         };
 
-        setCache(placeDetailsCache, cacheKey, enriched, PLACE_CACHE_TTL_MS);
+        await upsertPlaceEnrichment(originalName, enriched);
         return enriched;
+
       } catch (error) {
         console.error(`Failed to enrich place: ${originalName}`, error);
         return { name: originalName };
       }
     })
   );
+
+  return [...enrichedPlaces, ...newlyFetchedPlaces.filter((p): p is EnrichedPlace => p !== null)];
 }
 
-/**
- * Generates a travel itinerary using the Gemini API.
- */
 async function generateItineraryJson(
   places: EnrichedPlace[],
   days: number,
@@ -207,32 +176,23 @@ async function generateItineraryJson(
   const placeList = places.map((p) => `"${p.name}"`).join(', ');
   const prompt = `You are a world-class travel concierge creating a premium, compact itinerary for ${city}. Reply with a SINGLE JSON object: {"itinerary":[{...}]}. For a ${days}-day trip, each day has: "title" and "activities": EXACTLY 2 entries with { "title", "placeName"(from [${placeList}]), "priceRange" (Free/$/$$/$$$), "audience", "description"(~22-28 words), "whyVisit"(<=10 words), "insiderTip"(<=10 words) }. Make the writing polished and magazine-ready.`;
 
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const parsed = JSON.parse(text) as { itinerary?: ItineraryDay[] };
-    if (!Array.isArray(parsed.itinerary)) {
-      throw new Error('Malformed response: "itinerary" key is not an array.');
-    }
-    return parsed.itinerary;
-  } catch (error) {
-    console.error('Gemini itinerary generation failed:', error);
-    throw new Error('Could not generate a valid itinerary from the AI model.');
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const parsed = JSON.parse(text) as { itinerary?: ItineraryDay[] };
+  if (!Array.isArray(parsed.itinerary)) {
+    throw new Error('Malformed response: "itinerary" key is not an array.');
   }
+  return parsed.itinerary;
 }
 
-/**
- * Generates the main city guide content using the Gemini API.
- */
 async function generateCityGuideJson(city: string, places: EnrichedPlace[]): Promise<CityGuide> {
-  if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
-  const client = new GoogleGenerativeAI(geminiKey);
-  const model = client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { responseMimeType: 'application/json' } });
+    if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
+    const client = new GoogleGenerativeAI(geminiKey);
+    const model = client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { responseMimeType: 'application/json' } });
 
-  const placeNames = places.map((p) => p.name).join(', ');
-  const prompt = `You are a professional travel guide writer. For ${city}, produce a SINGLE JSON object {"guide":{...}}. The "guide" object has: "tagline", "coverPhotoSuggestion"(ONE from [${placeNames}]), "airportTransport":{title,content(55-70 words)}, "publicTransport":{title,content(55-70 words)}, "proTips":{title,content(55-70 words)}.`;
+    const placeNames = places.map((p) => p.name).join(', ');
+    const prompt = `You are a professional travel guide writer. For ${city}, produce a SINGLE JSON object {"guide":{...}}. The "guide" object has: "tagline", "coverPhotoSuggestion"(ONE from [${placeNames}]), "airportTransport":{title,content(55-70 words)}, "publicTransport":{title,content(55-70 words)}, "proTips":{title,content(55-70 words)}.`;
 
-  try {
     const result = await model.generateContent(prompt);
     const text = result.response.text();
     const parsed = JSON.parse(text) as { guide?: CityGuide };
@@ -240,29 +200,15 @@ async function generateCityGuideJson(city: string, places: EnrichedPlace[]): Pro
       throw new Error('Malformed response: "guide" key not found.');
     }
     return parsed.guide;
-  } catch (error) {
-    console.error('Gemini city guide generation failed:', error);
-    return { // Fallback content
-      tagline: 'Your Unforgettable Journey',
-      coverPhotoSuggestion: places[0]?.name || 'city view',
-      airportTransport: { title: 'Arrival & Airport Transit', content: 'Information currently unavailable.' },
-      publicTransport: { title: 'Navigating The City', content: 'Information currently unavailable.' },
-      proTips: { title: 'Insider Knowledge', content: 'Information currently unavailable.' },
-    };
-  }
 }
 
-/**
- * Generates the "Dreamers / Engineers" section using the Gemini API.
- */
 async function generateDreamersJson(city: string): Promise<DreamerRec[]> {
-  if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
-  const client = new GoogleGenerativeAI(geminiKey);
-  const model = client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { responseMimeType: 'application/json' } });
+    if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
+    const client = new GoogleGenerativeAI(geminiKey);
+    const model = client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { responseMimeType: 'application/json' } });
 
-  const prompt = `You are a career and education advisor. For ${city}, identify the top 2-4 universities or tech hubs interesting to engineers and entrepreneurs. Provide your response as a SINGLE JSON object: {"dreamers": [...]}. Each item must have: "name", "area" (neighborhood or district), "url", and "note" (a concise one-sentence summary of its relevance to tech/innovation).`;
+    const prompt = `You are a career and education advisor. For ${city}, identify the top 2-4 universities or tech hubs interesting to engineers and entrepreneurs. Provide your response as a SINGLE JSON object: {"dreamers": [...]}. Each item must have: "name", "area" (neighborhood or district), "url", and "note" (a concise one-sentence summary of its relevance to tech/innovation).`;
 
-  try {
     const result = await model.generateContent(prompt);
     const text = result.response.text();
     const parsed = JSON.parse(text) as { dreamers?: DreamerRec[] };
@@ -270,20 +216,14 @@ async function generateDreamersJson(city: string): Promise<DreamerRec[]> {
       throw new Error('Malformed response: "dreamers" key is not an array.');
     }
     return parsed.dreamers;
-  } catch (error) {
-    console.error(`Gemini dreamers generation failed for ${city}:`, error);
-    return []; // Return an empty array so PDF generation can still proceed.
-  }
 }
 
 /* ============================================================================
- * HTML & PDF GENERATION
+ * HTML & PDF GENERATION (STYLES RESTORED)
  * ============================================================================ */
 
-/**
- * Reads the logo file and returns it as a Base64 encoded data URI.
- */
 async function getLogoBase64(): Promise<string> {
+  // This can be cached in-memory as it won't change during runtime.
   let logoBase64Cache: string | null = null;
   if (logoBase64Cache) return logoBase64Cache;
   try {
@@ -293,14 +233,10 @@ async function getLogoBase64(): Promise<string> {
     return logoBase64Cache;
   } catch {
     console.error('Could not read logo file. It will be omitted from the PDF.');
-    logoBase64Cache = '';
-    return logoBase64Cache;
+    return '';
   }
 }
 
-/**
- * Constructs the complete HTML for the PDF.
- */
 async function buildHtml(
   guide: CityGuide,
   itinerary: ItineraryDay[],
@@ -330,14 +266,17 @@ async function buildHtml(
   let pageCounter = 2;
 
   itinerary.forEach((day, dayIndex) => {
-    for (let i = 0; i < day.activities.length; i += 2) {
-      const chunk = day.activities.slice(i, i + 2);
+    // Ensure activities is an array before processing
+    const activities = day.activities || [];
+    for (let i = 0; i < activities.length; i += 2) {
+      const chunk = activities.slice(i, i + 2);
       const activitiesHtml = chunk.map((activity) => {
           const place = enriched.find((p) => p.name === activity.placeName);
           const links = [
             place?.website ? `<a href="${place.website}" target="_blank">Official</a>` : '',
             place?.googleMapsUrl ? `<a href="${place.googleMapsUrl}" target="_blank">Maps</a>` : '',
-            place?.tripAdvisorUrl ? `<a href="${place.tripAdvisorUrl}" target="_blank">TripAdvisor</a>` : '',
+            // TripAdvisor link is generated on the fly, not from enriched data
+            `<a href="https://www.tripadvisor.com/Search?q=${encodeURIComponent(activity.placeName || '')}" target="_blank">TripAdvisor</a>`,
           ].filter(Boolean).join(' ');
 
           return `
@@ -454,18 +393,10 @@ async function buildHtml(
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><title>${city} – CityBreaker Guide</title>${styles}</head><body>${coverPageHtml}${itineraryHtml}${dreamersPage}</body></html>`;
 }
 
-/**
- * Dynamically determines the correct executable path for Puppeteer based on the environment.
- * @returns The path to the Chromium executable.
- */
 async function getExecutablePath(): Promise<string> {
-  // For production (in Docker), use the path from the environment variable.
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
-
-  // For local development, dynamically import the full 'puppeteer' package
-  // to find the browser it downloaded.
   try {
     const puppeteerFull = await import('puppeteer');
     return puppeteerFull.executablePath();
@@ -475,14 +406,10 @@ async function getExecutablePath(): Promise<string> {
   }
 }
 
-/**
- * Generates a PDF buffer from an HTML string using Puppeteer.
- */
 async function generatePdf(html: string): Promise<Buffer> {
   let browser = null;
   try {
     const executablePath = await getExecutablePath();
-
     browser = await puppeteer.launch({
       executablePath,
       args: [
@@ -499,7 +426,6 @@ async function generatePdf(html: string): Promise<Buffer> {
 
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
-
     const pdfRaw = await page.pdf({
       format: 'A4',
       printBackground: true,
@@ -508,60 +434,88 @@ async function generatePdf(html: string): Promise<Buffer> {
 
     return Buffer.isBuffer(pdfRaw) ? pdfRaw : Buffer.from(pdfRaw);
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 }
 
 /* ============================================================================
- * API ROUTE HANDLER
+ * API ROUTE HANDLER (Rewritten to use Firestore Cache)
  * ============================================================================ */
 
 export async function POST(req: NextRequest) {
   try {
     const { places = [], tripLength = 3, cityName = 'City Guide', sessionId } = await req.json();
+
     if (!Array.isArray(places) || !places.length) {
       return NextResponse.json({ error: 'Missing or invalid "places" array.' }, { status: 400 });
     }
     const city = cityName.trim();
     const days = Math.min(Math.max(tripLength, 1), 7);
 
-    const pdfCacheKey = `pdf:${slug(city)}:${days}`;
-    const cachedUrl = getCache(pdfCache, pdfCacheKey);
-    if (cachedUrl) {
-      return NextResponse.json({ url: cachedUrl });
+    // --- Firestore Cache Check ---
+    const placesSignature = computePlacesSignature(places);
+    const signatureHash = hashSignature(placesSignature);
+
+    const cachedItinerary = await getCachedItinerary(city, days, { signatureHash });
+
+    if (cachedItinerary && isItineraryFresh(cachedItinerary, DEFAULT_ITINERARY_TTL_MS)) {
+      if (cachedItinerary.assets?.pdfSignedUrl) {
+        console.log(`CACHE HIT: Returning signed URL for ${city} ${days}d.`);
+        return NextResponse.json({ url: cachedItinerary.assets.pdfSignedUrl, source: 'cache' });
+      }
     }
+    console.log(`CACHE MISS: Generating new guide for ${city} ${days}d.`);
 
+    // --- Generation Logic (Cache Miss) ---
     if (!mapsKey) mapsKey = await getSecret(MAPS_SECRET);
-
     const enriched = await enrichPlaces(places, mapsKey, city);
 
+    // Run all AI generation in parallel
     const [guide, itinerary, dreamers] = await Promise.all([
       generateCityGuideJson(city, enriched),
       generateItineraryJson(enriched, days, city),
       generateDreamersJson(city),
-    ]);
+    ]).catch(err => {
+        // If any of the Gemini calls fail, throw a specific error
+        console.error('Core content generation failed:', err);
+        throw new Error(`Failed to generate content from AI model. Details: ${err.message}`);
+    });
 
     const html = await buildHtml(guide, itinerary, enriched, city, dreamers);
     const pdf = await generatePdf(html);
+
     const filename = createFilename(city, days);
+    const gcsPath = sessionId ? `sessions/${sessionId}/${filename}` : `guides/${signatureHash}/${filename}`;
+    const file = storage.bucket(BUCKET_NAME).file(gcsPath);
 
-    if (sessionId) {
-      const file = storage.bucket(BUCKET_NAME).file(`sessions/${sessionId}/${filename}`);
-      await file.save(pdf, { contentType: 'application/pdf' });
-      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 60 * 60 * 1000 }); // 1 hour expiry
-      setCache(pdfCache, pdfCacheKey, url, PDF_CACHE_TTL_MS);
-      return NextResponse.json({ url });
-    }
+    await file.save(pdf, { contentType: 'application/pdf' });
+    const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 60 * 60 * 1000 }); // 1 hour
 
-    return new NextResponse(pdf, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-      },
-    });
+    // --- Store new result in Firestore Cache ---
+    const dataToCache: Omit<FirestoreItineraryCacheV2, 'updatedAt'> = {
+        city,
+        days,
+        places: enriched,
+        itinerary,
+        guide, // Storing the structured guide object
+        assets: {
+            pdfPath: gcsPath,
+            pdfSignedUrl: url,
+            coverPhotoUrl: enriched.find(p => p.name === guide.coverPhotoSuggestion)?.photoUrl,
+        },
+        meta: {
+            cacheVersion: 2,
+            model: GEMINI_MODEL,
+            signatureHash,
+            source: 'generated',
+            ttlMs: DEFAULT_ITINERARY_TTL_MS
+        },
+        createdAt: new Date().toISOString()
+    };
+    await storeCachedItinerary(city, days, dataToCache, { signatureHash });
+    
+    return NextResponse.json({ url, source: 'generated' });
+
   } catch (error: unknown) {
     const err = error as Error;
     console.error('PDF route top-level error:', err.message, err.stack);

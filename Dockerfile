@@ -1,82 +1,76 @@
 # ==============================================================================
-# STAGE 1: Builder
-# - Installs ALL dependencies (dev and prod) needed for the build.
-# - Creates the optimized standalone output for Next.js.
+# STAGE 1: Builder - Install dependencies and build the Next.js app
 # ==============================================================================
-FROM node:20-bookworm-slim AS builder
+FROM node:20-alpine AS builder
 
-# We REMOVE `ENV NODE_ENV=production` from this builder stage.
-# This is the key fix that ensures `npm install` gets the devDependencies
-# (like tailwindcss) required by the `next build` command.
-ENV NEXT_TELEMETRY_DISABLED=1 \
-    PUPPETEER_SKIP_DOWNLOAD=true
+# Install dependencies required to build and run Puppeteer with Chromium
+RUN apk add --no-cache \
+    bash \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    nodejs \
+    yarn \
+    udev \
+    dumb-init \
+    curl \
+    && rm -rf /var/cache/*
 
+# Set working directory
 WORKDIR /app
 
-# Install git, which may be needed for some npm packages
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+# Copy dependency manifests
+COPY package.json package-lock.json ./
 
-# Copy package manifests for dependency installation
-COPY package.json package-lock.json* ./
-
-# This command will now correctly install ALL dependencies (dev and prod)
+# Install dependencies
 RUN npm install
 
 # Copy the rest of the application source code
 COPY . .
 
-# Build the Next.js application for production.
-# This creates the .next/standalone directory because of our next.config.mjs setting.
+# Build the Next.js application
 RUN npm run build
 
-
 # ==============================================================================
-# STAGE 2: Runner
-# - Creates the final, minimal, secure image for production.
+# STAGE 2: Runner - Create the final, optimized production image
 # ==============================================================================
-FROM node:20-bookworm-slim AS runner
+FROM node:20-alpine AS runner
 
-# The production environment is correctly set ONLY in the final runner stage
-ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1 \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    PORT=8080
+# Install Chromium runtime dependencies
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    dumb-init \
+    udev \
+    && rm -rf /var/cache/*
+
+# Set Puppeteer to use system-installed Chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 
-# Install system dependencies for Chromium and other best practices
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium dumb-init \
-    libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 libdbus-1-3 \
-    libexpat1 libfontconfig1 libgbm1 libglib2.0-0 libgtk-3-0 libnspr4 libnss3 \
-    libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxcursor1 libxdamage1 \
-    libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 \
-    fonts-liberation fonts-noto-color-emoji \
-    && rm -rf /var/lib/apt/lists/*
+# Create a non-root user and group named 'nextjs' with UID/GID 1001
+RUN addgroup -g 1001 nextjs && adduser -S -u 1001 -G nextjs nextjs
 
-# Create a non-root user and group for security
-RUN groupadd --system --gid 1001 nextjs \
- && useradd --system --uid 1001 --gid nextjs nextjs
-
-# Change ownership of the app directory to the new user
-RUN chown nextjs:nextjs /app
-
-# Copy built application files from the builder stage
+# Copy build artifacts from builder stage with correct ownership
 COPY --from=builder --chown=nextjs:nextjs /app/public ./public
 COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
 
-# Switch to the non-root user for enhanced security
+# Use the non-root user
 USER nextjs
 
-# Expose the port the app will run on
+# Expose the port the app will run on. Cloud Run provides the PORT env var.
 EXPOSE 8080
+ENV PORT 8080
 
-# Add a healthcheck to verify the server is responsive
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/ || exit 1
-
-# Use dumb-init as the entrypoint to correctly handle process signals (e.g., SIGTERM)
-ENTRYPOINT ["dumb-init", "--"]
-
-# Set the default command to start the application server from the standalone output
+# Start the application
 CMD ["node", "server.js"]
