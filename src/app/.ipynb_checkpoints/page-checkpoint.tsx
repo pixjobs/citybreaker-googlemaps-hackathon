@@ -7,7 +7,7 @@ import SplitFlap from "@/components/SplitFlap";
 import AnimatedHeaderBoard from "@/components/AnimatedHeaderBoard";
 import SurpriseMe from "@/components/SurpriseMe";
 import WelcomePopup from "@/components/WelcomePopup";
-import { useMapBounds } from "@/lib/useMapBounds";
+import { useMapBounds } from "@/lib/useMapBounds"
 
 interface City {
   name: string;
