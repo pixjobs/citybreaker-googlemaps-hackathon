@@ -1,6 +1,7 @@
 # Use the official Microsoft Playwright image with Node.js 20.
+# The 'v1.48.0-jammy' tag is known to include Node.js 20 and is based on Jammy.
 # This image has all system dependencies for all browsers pre-installed.
-FROM mcr.microsoft.com/playwright/node:20-jammy
+FROM mcr.microsoft.com/playwright:v1.48.0-jammy
 
 # Set the working directory
 WORKDIR /app
