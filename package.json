@@ -28,7 +28,8 @@
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
     "react-markdown": "^10.1.0",
-    "sharp": "^0.34.3"
+    "sharp": "^0.34.3",
+    "zod": "^4.0.14"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
