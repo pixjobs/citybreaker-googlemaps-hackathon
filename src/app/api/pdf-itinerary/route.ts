@@ -6,6 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { Storage } from '@google-cloud/storage';
 import { promises as fsp } from 'node:fs';
+import { readdirSync } from 'fs';
 import path from 'node:path';
 import sharp from 'sharp';
 
@@ -29,7 +30,7 @@ import {
 const GEMINI_SECRET = 'projects/845341257082/secrets/gemini-api-key/versions/latest';
 const MAPS_SECRET   = 'projects/934477100130/secrets/places-api-key/versions/latest';
 const BUCKET_NAME   = 'citybreaker-downloads';
-const GEMINI_MODEL  = 'gemini-2.5-flash-lite';
+const GEMINI_MODEL  = 'gemini-2.5-flash';
 const MAX_AI_RETRIES = 3;
 
 const SOURCE_IMAGE_WIDTH = 1200;
