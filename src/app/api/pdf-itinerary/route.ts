@@ -367,7 +367,7 @@ async function generatePdf(html: string): Promise<Buffer> {
       browsersPath,
       chromiumDir,
       'chrome-linux',
-      'headless_shell'
+      'chrome'
     );
     console.log('Launching Chromium from:', executable);
 
@@ -375,6 +375,7 @@ async function generatePdf(html: string): Promise<Buffer> {
       headless: true,
       executablePath: executable,
       args: [
+        '--headless=new',
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
