@@ -1,7 +1,7 @@
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
+import { chromium } from 'playwright';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { Storage } from '@google-cloud/storage';
@@ -346,30 +346,27 @@ async function buildHtml(
 async function generatePdf(html: string): Promise<Buffer> {
   let browser = null;
   try {
-    // Puppeteer will now automatically find the browser in the cache directory
-    // specified by the PUPPETEER_CACHE_DIR environment variable in the Dockerfile.
-    browser = await puppeteer.launch({
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-      headless: true,
-      timeout: 60000,
-    });
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    // Launch a browser instance. Playwright finds its own browser automatically.
+    browser = await chromium.launch();
+    
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    
+    await page.setContent(html, { waitUntil: 'networkidle' });
+    
+    // The pdf() method is almost identical to Puppeteer's.
     const pdfRaw = await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' },
     });
-    return Buffer.isBuffer(pdfRaw) ? pdfRaw : Buffer.from(pdfRaw);
+    
+    return pdfRaw;
   } finally {
     if (browser) await browser.close();
   }
 }
+
 
 /* ============================================================================
  * ASYNCHRONOUS PDF GENERATION WORKER
