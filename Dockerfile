@@ -7,7 +7,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 
-# Install ALL dependencies to build the project
+# Install ALL dependencies, including the full Puppeteer for build caching
 RUN npm install
 
 COPY . .
@@ -26,10 +26,10 @@ WORKDIR /app
 RUN addgroup --gid 1001 --system nextjs && \
     adduser --uid 1001 --system --ingroup nextjs nextjs
 
-# Install ONLY the runtime dependencies for Chromium.
+# Install the system libraries needed by the Puppeteer-downloaded Chromium.
+# This list is essential for the browser to launch correctly.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-    chromium \
     ca-certificates \
     fonts-liberation \
     libasound2 \
@@ -69,19 +69,16 @@ RUN apt-get update \
 # Copy dependency manifests
 COPY package.json package-lock.json ./
 
-# Install ONLY production dependencies. This correctly installs puppeteer-core.
+# Install production dependencies. This will now install the full 'puppeteer'
+# package and download its own compatible Chromium browser into node_modules.
 RUN npm install --omit=dev
 
-# Set the environment for Next.js and Puppeteer
+# Set the environment for Next.js
 ENV NODE_ENV=production
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copy the built application from the builder stage
 COPY --from=builder --chown=nextjs:nextjs /app/public ./public
 COPY --from=builder --chown=nextjs:nextjs /app/.next ./.next
-
-# --- THE CORRECTED LINE ---
-# Copy the TypeScript config file instead of the JavaScript one.
 COPY --from=builder --chown=nextjs:nextjs /app/next.config.ts ./
 
 # Switch to the non-root user
@@ -90,5 +87,5 @@ USER nextjs
 EXPOSE 8080
 ENV PORT 8080
 
-# Use the standard Next.js start command
+# Start the application
 CMD ["npm", "start"]
