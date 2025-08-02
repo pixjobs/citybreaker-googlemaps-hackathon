@@ -9,7 +9,7 @@ import React, {
 } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
-import { X } from "lucide-react";
+import { Download, X } from "lucide-react";
 import Image from "next/image";
 import ActivityCard from "./ActivityCard";
 
@@ -18,10 +18,6 @@ gsap.registerPlugin(ScrollTrigger);
 const TRIP_LENGTH_OPTIONS = [3, 5, 7];
 const DEFAULT_TRIP_LENGTH = 3;
 const POLLING_INTERVAL_MS = 3000;
-
-/* ============================================================================
- * TYPE DEFINITIONS
- * ============================================================================ */
 
 interface EnrichedPlace {
   name: string;
@@ -72,10 +68,6 @@ const formatCityName = (input: string | undefined): string => {
   return input.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
-/* ============================================================================
- * COMPONENT
- * ============================================================================ */
-
 const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
   cityName,
   places,
@@ -91,6 +83,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
   const [pdfJobId, setPdfJobId] = useState<string | null>(null);
   const [pdfJobStatus, setPdfJobStatus] = useState<PdfJobStatus>('IDLE');
   const [pdfJobError, setPdfJobError] = useState<string | null>(null);
+  const [finalPdfUrl, setFinalPdfUrl] = useState<string | null>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -111,11 +104,11 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
   }, [onClose]);
 
   useEffect(() => {
-    const ctx = gsap.context(() => {
+    const _ctx = gsap.context(() => {
       gsap.fromTo(panelRef.current, { opacity: 0, y: 100 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" });
       gsap.from(".header-element", { y: -30, opacity: 0, stagger: 0.1, delay: 0.5, ease: "power3.out" });
     }, panelRef);
-    return () => ctx.revert();
+    return () => _ctx.revert();
   }, []);
 
   useEffect(() => {
@@ -153,10 +146,8 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
         if (currentReq === requestIdRef.current && !controller.signal.aborted) {
           const originalItinerary = data.itinerary || [];
           const allEnrichedPlaces = data.places || [];
-
-          // --- FIX: Enrich itinerary with day photos on the client-side ---
           const enrichedItinerary = originalItinerary.map(day => {
-            if (day.dayPhotoUrl) return day; // Respect backend-provided photo
+            if (day.dayPhotoUrl) return day;
             const firstPlaceName = day.activities?.[0]?.placeName;
             if (!firstPlaceName) return day;
             const photoPlace = allEnrichedPlaces.find(p => p.name === firstPlaceName);
@@ -197,13 +188,13 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
 
   useEffect(() => {
     if (!panelLoading && hasData) {
-      const ctx = gsap.context(() => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const _ctx = gsap.context(() => {
         ScrollTrigger.batch(".day-block", { onEnter: batch => gsap.from(batch, { autoAlpha: 0, y: 50, stagger: 0.15, ease: "power3.out" }), start: "top 90%" });
         ScrollTrigger.batch(".activity-card", { onEnter: batch => gsap.from(batch, { autoAlpha: 0, x: -50, stagger: 0.1, ease: "back.out(1.7)" }), start: "top 95%" });
       }, panelRef);
       return () => {
         ScrollTrigger.getAll().forEach((t) => t.kill());
-        ctx.revert();
       };
     }
   }, [panelLoading, hasData]);
@@ -220,15 +211,17 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
           throw new Error(errorData.error);
         }
         const data: PdfJobResponse = await res.json();
-        setPdfJobStatus(data.status);
+        if (data.status !== pdfJobStatus) {
+            setPdfJobStatus(data.status);
+        }
         if (data.status === 'COMPLETE') {
-          if (data.pdfUrl) {
-            window.open(data.pdfUrl, '_blank');
-          }
+          setFinalPdfUrl(data.pdfUrl || null);
           setPdfJobId(null);
+          setPdfJobStatus('IDLE');
         } else if (data.status === 'FAILED') {
           setPdfJobError(data.error || 'An unknown error occurred during PDF generation.');
           setPdfJobId(null);
+          setPdfJobStatus('IDLE');
         }
       } catch (err) {
         console.error(err);
@@ -238,13 +231,14 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
       }
     }, POLLING_INTERVAL_MS);
     return () => clearInterval(intervalId);
-  }, [pdfJobId, isGeneratingPdf]);
+  }, [pdfJobId, isGeneratingPdf, pdfJobStatus]);
 
-  const generateExtendedItineraryPDF = useCallback(async () => {
+  const startPdfGenerationJob = useCallback(async () => {
     if (isGeneratingPdf) return;
     setPdfJobStatus('PENDING');
     setPdfJobError(null);
     setPdfJobId(null);
+    setFinalPdfUrl(null);
     try {
       const res = await fetch("/api/pdf-itinerary", {
         method: "POST",
@@ -266,6 +260,8 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
 
   const handleTripLengthChange = useCallback((days: number) => {
     if (days !== currentTripLength && !panelLoading) {
+      setFinalPdfUrl(null);
+      setPdfJobError(null);
       setCurrentTripLength(days);
     }
   }, [currentTripLength, panelLoading]);
@@ -274,6 +270,36 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
     if (!name) return undefined;
     return enrichedPlaces.find((p) => p.name === name || p.name.toLowerCase() === name.toLowerCase());
   }, [enrichedPlaces]);
+
+  const renderPdfButton = () => {
+    if (finalPdfUrl) {
+      return (
+        <button
+          onClick={() => window.open(finalPdfUrl, '_blank')}
+          className="header-element flex min-w-[250px] items-center justify-center gap-2 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-transform hover:scale-105 hover:shadow-lg"
+        >
+          <Download size={16} />
+          Download Ready
+        </button>
+      );
+    }
+    return (
+      <button
+        onClick={startPdfGenerationJob}
+        disabled={isGeneratingPdf}
+        className="header-element flex min-w-[250px] items-center justify-center gap-2 rounded-full bg-gradient-to-r from-purple-500 to-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-transform hover:scale-105 hover:shadow-lg disabled:pointer-events-none disabled:opacity-60"
+      >
+        {isGeneratingPdf ? (
+          <>
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            <span>Generating...</span>
+          </>
+        ) : (
+          "Generate Premium PDF Itinerary"
+        )}
+      </button>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm" onClick={onClose}>
@@ -300,23 +326,7 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
               Your <span className="text-amber-300">{safeCityName}</span> Itinerary
             </h2>
             <div className="flex items-center gap-2">
-              {hasData && !panelLoading && (
-                <button
-                  onClick={generateExtendedItineraryPDF}
-                  disabled={isGeneratingPdf}
-                  className="header-element flex min-w-[250px] items-center justify-center gap-2 rounded-full bg-gradient-to-r from-purple-500 to-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-md transition-transform hover:scale-105 hover:shadow-lg disabled:pointer-events-none disabled:opacity-60"
-                  aria-label="Generate Premium Itinerary"
-                >
-                  {isGeneratingPdf ? (
-                    <>
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      <span>Generating...</span>
-                    </>
-                  ) : (
-                    "Generate Premium PDF Itinerary"
-                  )}
-                </button>
-              )}
+              {hasData && !panelLoading && renderPdfButton()}
               <button
                 onClick={onClose}
                 className="header-element rounded-full p-2 text-neutral-300 transition-colors hover:bg-neutral-700 hover:text-white"
@@ -332,7 +342,6 @@ const ItineraryPanel: React.FC<ItineraryPanelProps> = ({
             </div>
           )}
         </header>
-
         <main className="flex-grow overflow-y-auto p-3 sm:p-4 lg:p-6">
           {panelLoading ? (
             <div className="flex h-full flex-col items-center justify-center pt-10 text-neutral-500">
