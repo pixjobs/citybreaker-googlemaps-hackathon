@@ -23,6 +23,8 @@ RUN apk add --no-cache \
     ttf-freefont \
     chromium
 
+npx playwright install --with-deps chromium
+
 WORKDIR /app
 
 RUN addgroup --system --gid 1001 nextjs && \
