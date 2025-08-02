@@ -343,26 +343,18 @@ async function buildHtml(
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><title>${city} – CityBreaker Guide</title>${styles}</head><body>${coverPageHtml}${itineraryHtml}${dreamersPage}</body></html>`;
 }
 
-async function getExecutablePath(): Promise<string> {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
-  try {
-    const puppeteer = await import('puppeteer');
-    return puppeteer.executablePath();
-  } catch (error) {
-    console.error("Could not dynamically import 'puppeteer'.", error);
-    throw new Error("For local development, you must install the full 'puppeteer' package as a dev dependency (`npm install -D puppeteer`).");
-  }
-}
-
 async function generatePdf(html: string): Promise<Buffer> {
   let browser = null;
   try {
-    const executablePath = await getExecutablePath();
+    // Puppeteer will now automatically find the browser in the cache directory
+    // specified by the PUPPETEER_CACHE_DIR environment variable in the Dockerfile.
     browser = await puppeteer.launch({
-      executablePath,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--no-zygote', '--single-process'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
       headless: true,
       timeout: 60000,
     });
