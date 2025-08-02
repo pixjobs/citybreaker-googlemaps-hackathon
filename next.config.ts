@@ -4,14 +4,14 @@ const nextConfig: NextConfig = {
   output: "standalone",
   images: {
     remotePatterns: [
-      // NEW PATTERN: This is the fix for the new Places API v1
+      // UPDATED PATTERN: More specific for the new Places API v1
       {
         protocol: "https",
         hostname: "places.googleapis.com",
         port: "",
-        pathname: "/v1/places/**", // Wildcard to match all photo paths
+        pathname: "/v1/places/*/photos/*/media",
       },
-      // --- Existing Patterns ---
+      // --- Existing Patterns (unchanged) ---
       {
         protocol: "https",
         hostname: "maps.googleapis.com",
