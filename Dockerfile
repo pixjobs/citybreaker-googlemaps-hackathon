@@ -1,44 +1,48 @@
-# Stage 1: Build Stage
+# ┌───────────────────────────────────────────────────────────┐
+# │ Stage 1: Build Stage                                      │
+# └───────────────────────────────────────────────────────────┘
 FROM mcr.microsoft.com/playwright:v1.54.2-jammy AS builder
 
 WORKDIR /app
 
-# Skip browser download during npm install to save time
+# Don’t auto-download browsers during npm install
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Install Node dependencies
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Copy rest of the app and build
+# Build your Next.js app
 COPY . .
 RUN npm run build
 
-# Explicitly install the browser binaries AFTER build step
-RUN npx playwright install --with-deps chromium
+# Install ONLY the full Chromium binary (no headless_shell) for new headless mode
+RUN npx playwright install --with-deps --no-shell chromium
 
-# ---
-
-# Stage 2: Runtime Stage
+# ┌───────────────────────────────────────────────────────────┐
+# │ Stage 2: Runtime Stage                                     │
+# └───────────────────────────────────────────────────────────┘
 FROM mcr.microsoft.com/playwright:v1.54.2-jammy AS runner
 
 WORKDIR /app
 
-# Copy the .next standalone build and public assets from builder
+# Copy the standalone Next.js server and static assets
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/static ./.next/static
 
-# Copy Playwright browser binaries from builder stage
-COPY --from=builder /ms-playwright/ /ms-playwright/
+# Copy Playwright’s browsers directory
+COPY --from=builder /ms-playwright /ms-playwright
 
-# Use the pwuser (non-root) for security
+# Drop to non-root user
 USER pwuser
 
-# Environment variables for Next.js
+# Next.js runtime environment
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV NEXT_TELEMETRY_DISABLE=1
+
+# Tell Playwright where to find the Chromium binary
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 EXPOSE 8080
