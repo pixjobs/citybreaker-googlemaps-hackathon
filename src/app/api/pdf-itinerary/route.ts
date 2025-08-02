@@ -29,6 +29,7 @@ const GEMINI_SECRET = 'projects/845341257082/secrets/gemini-api-key/versions/lat
 const MAPS_SECRET   = 'projects/934477100130/secrets/places-api-key/versions/latest';
 const BUCKET_NAME   = 'citybreaker-downloads';
 const GEMINI_MODEL  = 'gemini-2.5-flash';
+const MAX_AI_RETRIES = 3; 
 
 const PLACES_SEARCH_TEXT_URL = 'https://places.googleapis.com/v1/places:searchText';
 const PLACES_PHOTO_BASE_URL  = 'https://places.googleapis.com/v1';
@@ -164,47 +165,71 @@ async function generateItineraryJson(
   days: number,
   city: string
 ): Promise<ItineraryDay[]> {
-  if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
-  const client = new GoogleGenerativeAI(geminiKey);
-  const model = client.getGenerativeModel({ model: GEMINI_MODEL });
-  const placeList = places.map((p) => `"${p.name}"`).join(', ');
-  const prompt = `You are a travel guide API. Your only output is a single, valid JSON object. Do not include any other text, markdown, or commentary. For a ${days}-day trip to ${city}, create a JSON object with a root key "itinerary". The "itinerary" is an array where each day has a "title" and an "activities" array. Each activity must have: "title", "placeName" (from [${placeList}]), "priceRange" (Free/$/$$/$$$), "audience", "description" (~22-28 words), "whyVisit" (<=10 words), and "insiderTip" (<=10 words).`;
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-  const parsed = parseLlmJson<{ itinerary?: ItineraryDay[] }>(text);
-  if (!Array.isArray(parsed.itinerary)) {
-    throw new Error('Malformed response: "itinerary" key is not an array.');
+  for (let i = 0; i < MAX_AI_RETRIES; i++) {
+    try {
+      if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
+      const client = new GoogleGenerativeAI(geminiKey);
+      const model = client.getGenerativeModel({ model: GEMINI_MODEL });
+      const placeList = places.map((p) => `"${p.name}"`).join(', ');
+      const prompt = `You are a travel guide API. Your only output is a single, valid JSON object. Do not include any other text, markdown, or commentary. For a ${days}-day trip to ${city}, create a JSON object with a root key "itinerary". The "itinerary" is an array where each day has a "title" and an "activities" array. Each activity must have: "title", "placeName" (from [${placeList}]), "priceRange" (Free/$/$$/$$$), "audience", "description" (~22-28 words), "whyVisit" (<=10 words), and "insiderTip" (<=10 words).`;
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      const parsed = parseLlmJson<{ itinerary?: ItineraryDay[] }>(text);
+      if (!Array.isArray(parsed.itinerary)) {
+        throw new Error('Malformed response: "itinerary" key is not an array.');
+      }
+      return parsed.itinerary;
+    } catch (error) {
+      console.warn(`Attempt ${i + 1} failed for generateItineraryJson. Retrying...`, error);
+      if (i === MAX_AI_RETRIES - 1) throw error;
+    }
   }
-  return parsed.itinerary;
+  throw new Error('Failed to generate itinerary after multiple retries.');
 }
 
 async function generateCityGuideJson(city: string, places: EnrichedPlace[]): Promise<CityGuide> {
-    if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
-    const client = new GoogleGenerativeAI(geminiKey);
-    const model = client.getGenerativeModel({ model: GEMINI_MODEL });
-    const placeNames = places.map((p) => p.name).join(', ');
-    const prompt = `You are a travel guide API. Your only output is a single, valid JSON object. Do not include any other text, markdown, or commentary. For ${city}, produce a JSON object with a root key "guide". The "guide" object must have: "tagline", "coverPhotoSuggestion" (ONE from [${placeNames}]), "airportTransport":{title,content(55-70 words)}, "publicTransport":{title,content(55-70 words)}, and "proTips":{title,content(55-70 words)}.`;
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const parsed = parseLlmJson<{ guide?: CityGuide }>(text);
-    if (!parsed.guide) {
-      throw new Error('Malformed response: "guide" key not found.');
+  for (let i = 0; i < MAX_AI_RETRIES; i++) {
+    try {
+      if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
+      const client = new GoogleGenerativeAI(geminiKey);
+      const model = client.getGenerativeModel({ model: GEMINI_MODEL });
+      const placeNames = places.map((p) => p.name).join(', ');
+      const prompt = `You are a travel guide API. Your only output is a single, valid JSON object. Do not include any other text, markdown, or commentary. For ${city}, produce a JSON object with a root key "guide". The "guide" object must have: "tagline", "coverPhotoSuggestion" (ONE from [${placeNames}]), "airportTransport":{title,content(55-70 words)}, "publicTransport":{title,content(55-70 words)}, and "proTips":{title,content(55-70 words)}.`;
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      const parsed = parseLlmJson<{ guide?: CityGuide }>(text);
+      if (!parsed.guide) {
+        throw new Error('Malformed response: "guide" key not found.');
+      }
+      return parsed.guide;
+    } catch (error) {
+      console.warn(`Attempt ${i + 1} failed for generateCityGuideJson. Retrying...`, error);
+      if (i === MAX_AI_RETRIES - 1) throw error;
     }
-    return parsed.guide;
+  }
+  throw new Error('Failed to generate city guide after multiple retries.');
 }
 
 async function generateDreamersJson(city: string): Promise<DreamerRec[]> {
-    if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
-    const client = new GoogleGenerativeAI(geminiKey);
-    const model = client.getGenerativeModel({ model: GEMINI_MODEL });
-    const prompt = `You are a career advisor API. Your only output is a single, valid JSON object. Do not include any other text, markdown, or commentary. For ${city}, identify 2-4 universities or tech hubs for engineers/entrepreneurs. Produce a JSON object with a root key "dreamers". Each item in the "dreamers" array must have: "name", "area" (neighborhood), "url", and "note" (a one-sentence summary of its relevance to tech/innovation).`;
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const parsed = parseLlmJson<{ dreamers?: DreamerRec[] }>(text);
-    if (!Array.isArray(parsed.dreamers)) {
-      throw new Error('Malformed response: "dreamers" key is not an array.');
+  for (let i = 0; i < MAX_AI_RETRIES; i++) {
+    try {
+      if (!geminiKey) geminiKey = await getSecret(GEMINI_SECRET);
+      const client = new GoogleGenerativeAI(geminiKey);
+      const model = client.getGenerativeModel({ model: GEMINI_MODEL });
+      const prompt = `You are a career advisor API. Your only output is a single, valid JSON object. Do not include any other text, markdown, or commentary. For ${city}, identify 2-4 universities or tech hubs for engineers/entrepreneurs. Produce a JSON object with a root key "dreamers". Each item in the "dreamers" array must have: "name", "area" (neighborhood), "url", and "note" (a one-sentence summary of its relevance to tech/innovation).`;
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      const parsed = parseLlmJson<{ dreamers?: DreamerRec[] }>(text);
+      if (!Array.isArray(parsed.dreamers)) {
+        throw new Error('Malformed response: "dreamers" key is not an array.');
+      }
+      return parsed.dreamers;
+    } catch (error) {
+      console.warn(`Attempt ${i + 1} failed for generateDreamersJson. Retrying...`, error);
+      if (i === MAX_AI_RETRIES - 1) throw error;
     }
-    return parsed.dreamers;
+  }
+  throw new Error('Failed to generate dreamers list after multiple retries.');
 }
 
 async function getLogoBase64(): Promise<string> {
@@ -256,13 +281,11 @@ async function buildHtml(
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><title>${city} – CityBreaker Guide</title>${styles}</head><body>${coverPageHtml}${itineraryHtml}${dreamersPage}</body></html>`;
 }
 
-// --- CORRECTED: getExecutablePath using dynamic import() ---
 async function getExecutablePath(): Promise<string> {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
   try {
-    // Use modern, lint-safe dynamic import
     const puppeteer = await import('puppeteer');
     return puppeteer.executablePath();
   } catch (error) {
@@ -312,7 +335,14 @@ async function performPdfGeneration(jobId: string, payload: PdfJob['requestPaylo
     ]);
 
     const html = await buildHtml(guide, itinerary, enriched, cityName, dreamers);
-    const pdf = await generatePdf(html);
+    
+    let pdf: Buffer;
+    try {
+        pdf = await generatePdf(html);
+    } catch (puppeteerError) {
+        console.error("Puppeteer-specific error during PDF generation:", puppeteerError);
+        throw new Error("Failed during PDF rendering. The service may be under heavy load or out of resources.");
+    }
 
     const filename = createFilename(cityName, tripLength);
     const gcsPath = `jobs/${jobId}/${filename}`;
