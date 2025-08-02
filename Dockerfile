@@ -3,7 +3,6 @@
 # ==============================================================================
 FROM node:20-slim AS builder
 
-# We don't need puppeteer dependencies here, only for building the app
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -27,7 +26,7 @@ WORKDIR /app
 RUN addgroup --gid 1001 --system nextjs && \
     adduser --uid 1001 --system --ingroup nextjs nextjs
 
-# Install ONLY the runtime dependencies for Chromium. This keeps the image smaller.
+# Install ONLY the runtime dependencies for Chromium.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     chromium \
@@ -70,19 +69,20 @@ RUN apt-get update \
 # Copy dependency manifests
 COPY package.json package-lock.json ./
 
-# ** THE CRITICAL FIX **
-# Install ONLY production dependencies. This correctly installs puppeteer-core
-# with all its necessary scripts, which the standalone output misses.
+# Install ONLY production dependencies. This correctly installs puppeteer-core.
 RUN npm install --omit=dev
 
 # Set the environment for Next.js and Puppeteer
 ENV NODE_ENV=production
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Copy the built application code from the builder stage
+# Copy the built application from the builder stage
 COPY --from=builder --chown=nextjs:nextjs /app/public ./public
 COPY --from=builder --chown=nextjs:nextjs /app/.next ./.next
-COPY --from=builder --chown=nextjs:nextjs /app/next.config.js ./
+
+# --- THE CORRECTED LINE ---
+# Copy the TypeScript config file instead of the JavaScript one.
+COPY --from=builder --chown=nextjs:nextjs /app/next.config.ts ./
 
 # Switch to the non-root user
 USER nextjs
@@ -90,5 +90,5 @@ USER nextjs
 EXPOSE 8080
 ENV PORT 8080
 
-# Use the standard Next.js start command, not the standalone server.js
+# Use the standard Next.js start command
 CMD ["npm", "start"]
