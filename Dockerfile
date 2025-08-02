@@ -3,6 +3,8 @@ FROM mcr.microsoft.com/playwright:v1.54.2-jammy AS builder
 
 WORKDIR /app
 
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 COPY package.json package-lock.json ./
 RUN npm install
 COPY . .
@@ -25,6 +27,8 @@ WORKDIR /app
 
 RUN addgroup --system --gid 1001 nextjs && \
     adduser --system --uid 1001 --ingroup nextjs nextjs
+
+COPY --from=builder /ms-playwright/ /ms-playwright/
 
 COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nextjs /app/public ./public
