@@ -343,30 +343,43 @@ async function buildHtml(
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><title>${city} – CityBreaker Guide</title>${styles}</head><body>${coverPageHtml}${itineraryHtml}${dreamersPage}</body></html>`;
 }
 
+// Hardened PDF generation with explicit path and sandbox flags
 async function generatePdf(html: string): Promise<Buffer> {
   let browser = null;
   try {
-    // Launch a browser instance. Playwright finds its own browser automatically.
-    browser = await chromium.launch();
-    
+    const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH || '';
+    const executable = path.join(
+      browsersPath,
+      'chromium-1181',
+      'chrome-linux',
+      'headless_shell'
+    );
+    console.log('PLAYWRIGHT_BROWSERS_PATH:', browsersPath);
+    console.log('Launching Chromium from:', executable);
+
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: executable,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-breakpad'  
+      ]
+    });
+
     const context = await browser.newContext();
     const page = await context.newPage();
-    
     await page.setContent(html, { waitUntil: 'networkidle' });
-    
-    // The pdf() method is almost identical to Puppeteer's.
-    const pdfRaw = await page.pdf({
+    return await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: { top: '0px', right: '0px', bottom: '0px', left: '0px' },
     });
-    
-    return pdfRaw;
   } finally {
     if (browser) await browser.close();
   }
 }
-
 
 /* ============================================================================
  * ASYNCHRONOUS PDF GENERATION WORKER
