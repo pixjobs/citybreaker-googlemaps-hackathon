@@ -343,18 +343,31 @@ async function buildHtml(
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><title>${city} – CityBreaker Guide</title>${styles}</head><body>${coverPageHtml}${itineraryHtml}${dreamersPage}</body></html>`;
 }
 
-// Hardened PDF generation with explicit path and sandbox flags
+// ----- Hardened PDF Generation -----
 async function generatePdf(html: string): Promise<Buffer> {
   let browser = null;
   try {
-    const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH || '';
+    const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH || '/ms-playwright';
+    console.log('PLAYWRIGHT_BROWSERS_PATH:', browsersPath);
+    
+    // Dynamically locate the installed Chromium subfolder
+    let chromiumDir: string | undefined;
+    try {
+      const entries = readdirSync(browsersPath, { withFileTypes: true });
+      chromiumDir = entries.find(e => e.isDirectory() && e.name.startsWith('chromium-'))?.name;
+    } catch (err) {
+      console.error('Failed to read PLAYWRIGHT_BROWSERS_PATH directory', err);
+    }
+    if (!chromiumDir) {
+      throw new Error(`No Chromium install directory found under ${browsersPath}`);
+    }
+
     const executable = path.join(
       browsersPath,
-      'chromium-1181',
+      chromiumDir,
       'chrome-linux',
       'headless_shell'
     );
-    console.log('PLAYWRIGHT_BROWSERS_PATH:', browsersPath);
     console.log('Launching Chromium from:', executable);
 
     browser = await chromium.launch({
@@ -364,7 +377,7 @@ async function generatePdf(html: string): Promise<Buffer> {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-breakpad'  
+        '--disable-breakpad'
       ]
     });
 
