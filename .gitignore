@@ -70,5 +70,5 @@ docker-compose.override.yml
 *.tmp
 *.log
 
-.ipynb_checkpoints
+*.ipynb_checkpoints
 *.ipynb

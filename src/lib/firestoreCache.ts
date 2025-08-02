@@ -16,7 +16,7 @@ import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { createHash } from 'crypto';
 
 /* ==============================
- * Narrow, reusable domain types
+ * Domain Types
  * ============================== */
 
 export interface LatLng {
@@ -31,6 +31,11 @@ export interface EnrichedPlace {
   website?: string;
   googleMapsUrl?: string;
   location?: LatLng;
+}
+
+export interface GetItineraryOptions {
+  signatureHash?: string;
+  variant?: string;
 }
 
 export interface ItineraryActivityCache {
@@ -49,47 +54,31 @@ export interface ItineraryDayCache {
   activities?: ItineraryActivityCache[];
 }
 
+export interface PdfJob {
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETE' | 'FAILED';
+  pdfUrl?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  requestPayload: {
+    places: { name: string }[];
+    tripLength: number;
+    cityName: string;
+  };
+}
+
 export type JsonObject = Record<string, unknown>;
-
-/* ==============================
- * V1 (back-compat) cache type
- * ============================== */
-
-export interface FirestoreItineraryCache {
-  city: string;
-  days: number;
-  places: EnrichedPlace[];
-  itinerary: ItineraryDayCache[];
-  createdAt?: string;
-  updatedAt: FirebaseFirestore.Timestamp;
-}
-
-/* ==============================
- * V2 expandable cache type
- * ============================== */
-
-export type SummaryLevel = 'standard' | 'extended' | string;
-export type Variant = 'basic' | 'pro' | 'extended' | string;
-
-export interface CacheAssets {
-  pdfPath?: string;
-  pdfSignedUrl?: string;
-  coverPhotoUrl?: string;
-}
 
 export interface CacheMeta {
   cacheVersion: number;
   model?: string;
   prompt?: string;
   rawGeminiText?: string;
-
   placesSignature?: string;
   signatureHash?: string;
-
-  variant?: Variant;
-  summaryLevel?: SummaryLevel;
-
-  responseType?: 'json' | 'pdf' | 'both' | string;
+  variant?: string;
+  summaryLevel?: string;
+  responseType?: string;
   source?: 'generated' | 'cache';
   ttlMs?: number;
 }
@@ -99,116 +88,112 @@ export interface FirestoreItineraryCacheV2 {
   days: number;
   places: EnrichedPlace[];
   itinerary: ItineraryDayCache[];
-
-  // Optional extended/guide payload
   guide?: JsonObject;
-
-  // Optional assets and metadata
-  assets?: CacheAssets;
+  assets?: {
+    pdfPath?: string;
+    pdfSignedUrl?: string;
+    coverPhotoUrl?: string;
+  };
   meta?: CacheMeta;
-
   createdAt?: string;
   updatedAt: FirebaseFirestore.Timestamp;
 }
-
-/* ==============================
- * Place enrichment cache type
- * ============================== */
-
 export interface PlaceEnrichmentDoc {
-  nameKey: string;               // normalized key "place-<slug>"
-  place: EnrichedPlace;          // single place enrichment payload
+  nameKey: string;
+  place: EnrichedPlace;
   createdAt?: FirebaseFirestore.Timestamp;
   updatedAt: FirebaseFirestore.Timestamp;
 }
 
 /* ==============================
- * Collections / constants
+ * Collections / Constants
  * ============================== */
 
-export const ITINERARY_COLLECTION = 'itineraryCache_v2';
-export const PLACE_COLLECTION = 'placeEnrichment_v1';
+const ITINERARY_COLLECTION = 'itineraryCache_v2';
+const PLACE_COLLECTION = 'placeEnrichment_v1';
+const JOBS_COLLECTION = 'pdfJobs';
 
-export const DEFAULT_ITINERARY_TTL_MS = 31 * 24 * 60 * 60 * 1000; // 31 days
-export const PLACE_TTL_MS = 180 * 24 * 60 * 60 * 1000;             // 180 days
+export const DEFAULT_ITINERARY_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+export const PLACE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
-// Secret Manager: project ID for firebase-admin
-const PROJECT_ID_SECRET =
-  'projects/934477100130/secrets/citybreaker-project-id/versions/latest';
+const PROJECT_ID_SECRET = 'projects/934477100130/secrets/citybreaker-project-id/versions/latest';
 
 /* ==============================
- * Singletons
+ * Singletons & Initialization
  * ============================== */
 
 let firestore: Firestore | null = null;
 let initPromise: Promise<void> | null = null;
 let secretsClient: SecretManagerServiceClient | null = null;
 
-/* ==============================
- * Secret Manager / initialization
- * ============================== */
-
 async function fetchProjectIdFromSecret(): Promise<string> {
   if (!secretsClient) secretsClient = new SecretManagerServiceClient();
   const [version] = await secretsClient.accessSecretVersion({ name: PROJECT_ID_SECRET });
   const raw = version.payload?.data?.toString();
   if (!raw) throw new Error(`Secret payload is empty for ${PROJECT_ID_SECRET}`);
-
-  // Try JSON payload first (allows future extension), then fall back to raw string
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const candidates = [
-      parsed['projectId'],
-      parsed['project_id'],
-      parsed['PROJECT_ID'],
-    ];
-    for (const c of candidates) {
-      if (typeof c === 'string' && c.trim()) {
-        return c.trim();
-      }
-    }
-  } catch {
-    // not JSON; continue to raw string fallback
-  }
-
+    const id = parsed['projectId'] || parsed['project_id'];
+    if (typeof id === 'string' && id.trim()) return id.trim();
+  } catch { /* Not JSON, fall through */ }
   const trimmed = raw.trim();
-  if (!trimmed) {
-    throw new Error(`Secret ${PROJECT_ID_SECRET} resolved to empty string`);
-  }
+  if (!trimmed) throw new Error(`Secret ${PROJECT_ID_SECRET} resolved to empty string`);
   return trimmed;
 }
 
 async function ensureFirestore(): Promise<void> {
   if (firestore) return;
   if (initPromise) return initPromise;
-
   initPromise = (async () => {
     const existing = getApps();
     if (existing.length > 0) {
       firestore = getAdminFirestore(existing[0]);
       return;
     }
-
     const projectId = await fetchProjectIdFromSecret();
     const opts: AppOptions = { credential: applicationDefault(), projectId };
     const app: App = initializeApp(opts);
     const db = getAdminFirestore(app);
     db.settings({ ignoreUndefinedProperties: true });
-
-    const emulator = process.env.FIRESTORE_EMULATOR_HOST;
-    console.log(
-      `FIRESTORE: Initialized via Secret Manager. project=${projectId}` +
-        (emulator ? ` (emulator=${emulator})` : '')
-    );
-
+    console.log(`FIRESTORE: Initialized via Secret Manager. project=${projectId}`);
     firestore = db;
   })();
-
   return initPromise;
 }
 
 /* ==============================
- * Keying / signatures
+ * PDF Job Functions (CORRECTED)
+ * ============================== */
+
+export async function createPdfJob(jobId: string, payload: PdfJob['requestPayload']): Promise<void> {
+  await ensureFirestore(); // <-- STEP 1: Ensure DB is connected
+  const jobRef = (firestore as Firestore).collection(JOBS_COLLECTION).doc(jobId); // <-- STEP 2: Use 'firestore'
+  const now = new Date().toISOString();
+  await jobRef.set({
+    status: 'PENDING',
+    createdAt: now,
+    updatedAt: now,
+    requestPayload: payload,
+  });
+}
+
+export async function updatePdfJob(jobId: string, data: Partial<Omit<PdfJob, 'createdAt' | 'requestPayload'>>): Promise<void> {
+  await ensureFirestore(); // <-- STEP 1: Ensure DB is connected
+  const jobRef = (firestore as Firestore).collection(JOBS_COLLECTION).doc(jobId); // <-- STEP 2: Use 'firestore'
+  await jobRef.update({ ...data, updatedAt: new Date().toISOString() });
+}
+
+export async function getPdfJob(jobId: string): Promise<PdfJob | null> {
+  await ensureFirestore(); // <-- STEP 1: Ensure DB is connected
+  const doc = await (firestore as Firestore).collection(JOBS_COLLECTION).doc(jobId).get(); // <-- STEP 2: Use 'firestore'
+  if (!doc.exists) {
+    return null;
+  }
+  return doc.data() as PdfJob;
+}
+
+/* ==============================
+ * Keying / Signatures
  * ============================== */
 
 export function normalizeCityKey(city: string): string {
@@ -216,21 +201,13 @@ export function normalizeCityKey(city: string): string {
 }
 
 export function computePlacesSignature(places: { name: string }[]): string {
-  return (places || [])
-    .map((p) => (p?.name || '').trim().toLowerCase())
-    .filter((s) => s.length > 0)
-    .sort()
-    .join('|');
+  return (places || []).map((p) => (p?.name || '').trim().toLowerCase()).filter(Boolean).sort().join('|');
 }
 
 export function hashSignature(sig: string, length = 12): string {
   return createHash('sha1').update(sig).digest('hex').slice(0, Math.max(4, length));
 }
 
-/**
- * Flexible, namespaced itinerary key:
- *   city-<cityKey>-days-<n>[-sig-<hash>][-v-<variant>]
- */
 export function buildItineraryKey(
   city: string,
   days: number,
@@ -241,7 +218,7 @@ export function buildItineraryKey(
   return (
     `city-${cityKey}-days-${days}` +
     (signatureHash ? `-sig-${signatureHash}` : '') +
-    (variant ? `-v-${variant}` : '')
+    (variant ? `-v-${variant}` : '') 
   );
 }
 
@@ -265,26 +242,15 @@ function cleanUndefined<T>(obj: T): T {
   return obj;
 }
 
-export function isItineraryFresh(
-  doc: Pick<FirestoreItineraryCacheV2, 'createdAt' | 'updatedAt'>,
-  ttlMs: number,
-  now = Date.now()
-): boolean {
-  const tsMs = doc.createdAt
-    ? new Date(doc.createdAt).getTime()
-    : doc.updatedAt?.toDate?.().getTime?.() || 0;
+export function isItineraryFresh(doc: Pick<FirestoreItineraryCacheV2, 'createdAt' | 'updatedAt'>, ttlMs: number, now = Date.now()): boolean {
+  const tsMs = doc.createdAt ? new Date(doc.createdAt).getTime() : doc.updatedAt?.toDate?.().getTime?.() || 0;
   if (!tsMs || Number.isNaN(tsMs)) return false;
   return now - tsMs < ttlMs;
 }
 
 /* ==============================
- * Itinerary cache (V2, expandable)
+ * Itinerary Cache
  * ============================== */
-
-export interface GetItineraryOptions {
-  signatureHash?: string;
-  variant?: Variant;
-}
 
 export async function getCachedItinerary(
   city: string,
@@ -292,6 +258,7 @@ export async function getCachedItinerary(
   opts: GetItineraryOptions = {}
 ): Promise<FirestoreItineraryCacheV2 | null> {
   await ensureFirestore();
+    
   const key = buildItineraryKey(city, days, opts.signatureHash, opts.variant);
   try {
     const snap = await (firestore as Firestore)
@@ -312,32 +279,29 @@ export async function getCachedItinerary(
 
 export interface StoreItineraryOptions {
   signatureHash?: string;
-  variant?: Variant;
+  variant?: string;
 }
 
 export async function storeCachedItinerary(
   city: string,
   days: number,
   data: Omit<FirestoreItineraryCacheV2, 'updatedAt'>,
-  opts: StoreItineraryOptions = {}
+  opts: StoreItineraryOptions = {} // Use the corrected interface
 ): Promise<void> {
   await ensureFirestore();
+  // The key builder must also be aware of the variant
   const key = buildItineraryKey(city, days, opts.signatureHash, opts.variant);
 
   try {
-    // Ensure createdAt exists (your schema uses ISO string for createdAt)
     const createdAt = data.createdAt ?? new Date().toISOString();
-
-    // IMPORTANT: type this as Omit<…,'updatedAt'> so TS doesn’t require it here.
     const payload = cleanUndefined<Omit<FirestoreItineraryCacheV2, 'updatedAt'>>({
       ...data,
       createdAt,
       meta: {
-        // keep any existing meta, but guarantee cacheVersion and overlay variant/signature from opts
         cacheVersion: data.meta?.cacheVersion ?? 2,
         ...data.meta,
         signatureHash: opts.signatureHash ?? data.meta?.signatureHash,
-        variant: opts.variant ?? data.meta?.variant,
+        variant: opts.variant ?? data.meta?.variant, // Ensure variant is stored in meta
       },
     });
 
@@ -359,30 +323,22 @@ export async function storeCachedItinerary(
 }
 
 /* ==============================
- * Per-place enrichment cache (shared)
+ * Per-Place Enrichment Cache
  * ============================== */
 
 function normalizePlaceNameKey(name: string): string {
-  return (name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9\-]/g, '')
-    .slice(0, 200);
+  return (name || '').trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '').slice(0, 200);
 }
 
 export function placeKeyFromName(name: string): string {
   return `place-${normalizePlaceNameKey(name)}`;
 }
 
-export async function getManyPlaceEnrichments(
-  names: string[]
-): Promise<Map<string, PlaceEnrichmentDoc>> {
+export async function getManyPlaceEnrichments(names: string[]): Promise<Map<string, PlaceEnrichmentDoc>> {
   await ensureFirestore();
   const map = new Map<string, PlaceEnrichmentDoc>();
   const keys = Array.from(new Set((names || []).map(placeKeyFromName)));
   if (keys.length === 0) return map;
-
   const refs = keys.map((k) => (firestore as Firestore).collection(PLACE_COLLECTION).doc(k));
   const snaps = await (firestore as Firestore).getAll(...refs);
   snaps.forEach((snap, idx) => {
@@ -397,15 +353,12 @@ export async function upsertPlaceEnrichment(name: string, place: EnrichedPlace):
   await ensureFirestore();
   const key = placeKeyFromName(name);
   try {
-    await (firestore as Firestore).collection(PLACE_COLLECTION).doc(key).set(
-      {
-        nameKey: key,
-        place,
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: Timestamp.now(),
-      },
-      { merge: true }
-    );
+    await (firestore as Firestore).collection(PLACE_COLLECTION).doc(key).set({
+      nameKey: key,
+      place,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: Timestamp.now(),
+    }, { merge: true });
     console.log(`FIRESTORE: Upserted place enrichment for ${key}`);
   } catch (err) {
     console.error(`FIRESTORE: Failed to upsert place enrichment for ${key}`, err);
