@@ -3,44 +3,44 @@ FROM mcr.microsoft.com/playwright:v1.54.2-jammy AS builder
 
 WORKDIR /app
 
+# Skip browser download during npm install to save time
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
+# Install Node dependencies
 COPY package.json package-lock.json ./
-RUN npm install
+RUN npm ci
+
+# Copy rest of the app and build
 COPY . .
 RUN npm run build
 
+# Explicitly install the browser binaries AFTER build step
+RUN npx playwright install --with-deps chromium
+
 # ---
 
-# Stage 2: Production/Runner Stage
-FROM node:20-alpine AS runner
-
-# Install fonts and system dependencies needed for PDF generation at runtime
-# We use sudo because the base node:alpine image doesn't have it, but we need root to install.
-# We then drop privileges.
-RUN apk add --no-cache \
-    udev \
-    ttf-freefont \
-    chromium
+# Stage 2: Runtime Stage
+FROM mcr.microsoft.com/playwright:v1.54.2-jammy AS runner
 
 WORKDIR /app
 
-RUN addgroup --system --gid 1001 nextjs && \
-    adduser --system --uid 1001 --ingroup nextjs nextjs
+# Copy the .next standalone build and public assets from builder
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/static ./.next/static
 
+# Copy Playwright browser binaries from builder stage
 COPY --from=builder /ms-playwright/ /ms-playwright/
 
-COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nextjs /app/public ./public
-COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+# Use the pwuser (non-root) for security
+USER pwuser
 
-USER nextjs
+# Environment variables for Next.js
+ENV NODE_ENV=production
+ENV PORT=8080
+ENV NEXT_TELEMETRY_DISABLE=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 EXPOSE 8080
-ENV PORT 8080
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLE 1
-
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 CMD ["node", "server.js"]
