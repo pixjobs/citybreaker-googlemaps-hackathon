@@ -23,8 +23,6 @@ RUN apk add --no-cache \
     ttf-freefont \
     chromium
 
-npx playwright install --with-deps chromium
-
 WORKDIR /app
 
 RUN addgroup --system --gid 1001 nextjs && \
@@ -43,7 +41,6 @@ ENV PORT 8080
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLE 1
 
-# IMPORTANT: Tell Playwright where to find the browser installed via apk
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/bin
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 CMD ["node", "server.js"]
